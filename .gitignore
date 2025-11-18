@@ -1,0 +1,16 @@
+# 仮想環境
+env/
+
+# Pythonキャッシュ
+__pycache__/
+*.pyc
+
+# データファイル (CSV)
+*.csv
+
+# Jupyter Notebookキャッシュ
+.ipynb_checkpoints/
+
+# IDE設定 (もし使っているなら)
+.vscode/
+.idea/
