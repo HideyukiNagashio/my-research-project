@@ -9,14 +9,15 @@ RIGHT_FOOT_ADDRESS = "00C1C940-F3E6-8B97-3909-79DCCAD5EA86"  # 右足デバイ�
 LEFT_FOOT_ADDRESS = "F49B4121-FEE1-89BA-3643-A0563792CDCC"   # 左足デバイスのBluetoothアドレス
 
 # 保存するCSVファイル名
-RIGHT_CSV_FILENAME = "sample_right_foot_data_imu.csv"
-LEFT_CSV_FILENAME = "sample_left_foot_data_imu.csv"
+RIGHT_CSV_FILENAME = "iwasaki_l_right_foot_data.csv"
+LEFT_CSV_FILENAME = "iwasaki_l_left_foot_data.csv"
 
 # データ記録フラグ
 is_recording = False
 
 # グローバル変数で両方のデータを受信
 received_data = {"Right": [], "Left": []}
+
 
 # マーカー用の変数
 marker_counter = 0
