@@ -9,7 +9,8 @@ __pycache__/
 *.csv
 # データファイル (NumPy)
 *.npz
-
+# データファイル (PyTorch)
+*.pth
 # Jupyter Notebookキャッシュ
 .ipynb_checkpoints/
 
