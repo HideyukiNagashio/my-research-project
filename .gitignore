@@ -11,6 +11,7 @@ __pycache__/
 *.npz
 # データファイル (PyTorch)
 *.pth
+*.png
 # Jupyter Notebookキャッシュ
 .ipynb_checkpoints/
 
