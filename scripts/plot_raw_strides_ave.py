@@ -57,9 +57,14 @@ def load_data():
                 loaded = np.load(file_path, allow_pickle=True)
                 ensemble = loaded['ensemble'] # (strides, sequence_length, columns)
                 cols = list(loaded['columns'])
+                
+                # ★ 追加: durations が保存されていれば読み込む（古いファイルへの配慮）
+                durations = loaded['durations'] if 'durations' in loaded else np.array([])
+                
                 data[(p, c)] = {
                     'ensemble': ensemble,
                     'columns': cols,
+                    'durations': durations  # ★ 追加
                 }
                 if not all_columns:
                     all_columns = cols
@@ -131,6 +136,62 @@ def plot_raw_strides(data, plot_columns):
         print(f"  保存: {save_path}")
         plt.close(fig)
 
+def plot_stride_durations(data):
+    """
+    参加者・条件ごとの歩行所要時間（スカラー値）をエラーバー付き棒グラフで可視化
+    """
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    
+    fig, axes = plt.subplots(1, len(CONDITIONS), figsize=(18, 5), sharey=True)
+    fig.suptitle("Stride Durations (Seconds)", fontsize=16, fontweight='bold')
+
+    for ax_idx, cond in enumerate(CONDITIONS):
+        ax = axes[ax_idx]
+        ax.set_title(f"Condition: {CONDITION_LABELS[cond]} ({cond})", fontsize=13)
+        ax.set_xlabel("Participant", fontsize=11)
+        if ax_idx == 0:
+            ax.set_ylabel("Duration [s]", fontsize=11)
+
+        means = []
+        stds = []
+        x_labels = []
+        bar_colors = []
+
+        for p_idx, participant in enumerate(PARTICIPANTS):
+            if (participant, cond) in EXCLUDE_KEYS:
+                continue
+
+            key = (participant, cond)
+            if key not in data or 'durations' not in data[key]:
+                continue
+
+            durs = data[key]['durations']
+            if len(durs) == 0:
+                continue
+
+            # 平均と標準偏差を計算
+            means.append(np.mean(durs))
+            stds.append(np.std(durs))
+            x_labels.append(participant)
+            bar_colors.append(COLORS[p_idx])
+
+        # 棒グラフの描画
+        if means:
+            x_pos = np.arange(len(x_labels))
+            ax.bar(x_pos, means, yerr=stds, color=bar_colors, alpha=0.8, capsize=4, edgecolor='black')
+            ax.set_xticks(x_pos)
+            ax.set_xticklabels(x_labels, rotation=45, ha='right')
+            
+        ax.grid(True, alpha=0.3, axis='y') # Y軸のみグリッドを表示
+
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
+
+    # 保存
+    save_path = os.path.join(OUTPUT_DIR, "plot_stride_durations_ave.png")
+    fig.savefig(save_path, dpi=150, bbox_inches='tight')
+    print(f"  保存: {save_path}")
+    plt.close(fig)
+
 # ============================================================
 #  実行
 # ============================================================
@@ -140,6 +201,10 @@ if __name__ == "__main__":
     if cols:
         print(f"見つかったカラム数: {len(cols)}")
         plot_raw_strides(data_dict, cols)
+        
+        # ★ 追加: 所要時間のプロットを実行
+        plot_stride_durations(data_dict)
+        
         print("=== 終了 ===")
     else:
         print("有効なデータが見つかりませんでした。")

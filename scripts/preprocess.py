@@ -1,24 +1,39 @@
 """
-歩行データ前処理スクリプト（高速化版）
+歩行データ前処理スクリプト（深層学習用）
 
-【ipynbからの主な変更点】
-  正規化:
-    IMU      → 静止区間オフセット除去（条件ごと） + グローバルstdスケーリング
-    足底圧力 → グローバルmin-max（全データ or trainのみ）
-    関節角度 → /180 固定定数
-    床反力   → 体重正規化のまま（変更なし）
+【正規化方針】
+  IMU:
+    ジャイロ  → 静止区間バイアス除去（条件ごと）+ グローバルstdスケーリング
+    加速度    → グローバルstdスケーリングのみ（オフセット除去しない）
+    ※加速度のオフセット除去をしない理由:
+      静止時に常に1Gの重力ベクトルがかかっており，足スイング時の各軸への
+      重力分配の変化がモデルの姿勢推定の基準となる．オフセット除去すると
+      「並進加速度」と「姿勢変化による重力の回り込み」の区別ができなくなる．
+
+  足底圧力（Phase1）:
+    体重[N]で割る（床反力と同じ基準，被験者間の体重差を除去）
+  足底圧力（Phase2）:
+    全センサ・全データの単一スカラーmaxで割る → [0, 1]にclip
+    ※センサごとの独立min-maxは踵/土踏まず/つま先の空間的圧力分布を破壊するため使わない
+
+  関節角度（出力ターゲット）:
+    /180 の固定定数スケーリング（逆変換: × 180）
+
+  床反力:
+    体重正規化 [%BW]のまま（変更なし）
+
   外れ値除去:
-    std → MAD（頑健推定）
+    std → MAD（外れ値がstd自体を膨らませるのを防ぐ）
 
 【高速化のポイント】
-  1. 関節角度計算: Pythonループ → NumPy完全ベクトル化（約120x faster）
-  2. 補間処理:     列ごとloop  → axis=0 一括補間（約3x faster）
-  3. 外部ループ:   逐次処理    → multiprocessing.Pool で並列化
+  1. 関節角度計算: NumPy完全ベクトル化
+  2. 補間処理:     axis=0 一括補間
+  3. 外部ループ:   multiprocessing.Pool で並列化
 
 【処理フロー】
-  Phase 1: 全データの生ストライド抽出（正規化前）
+  Phase 1: 全データの生ストライド抽出（体重正規化・ジャイロバイアス除去のみ）
   Phase 2: グローバル統計量の計算（全データ or trainのみで実行）
-  Phase 3: 正規化適用 → 保存
+  Phase 3: 正規化適用（IMU std, 圧力 global max, 関節角度 /180）→ 保存
 """
 
 import os
@@ -301,10 +316,30 @@ def normalize_force_by_bodyweight(df_force, mass):
 # 7. IMU オフセット除去（静止区間平均を引く）
 # ============================================================
 def remove_imu_offset(df_input):
+    """
+    IMUオフセット除去．
+
+    【処理の根拠】
+    ジャイロ（角速度）:
+        静止時にゼロバイアス・ドリフトが生じる（静止しているのに角速度が出力される）．
+        静止区間の平均を引いてバイアスを除去するのが正しい．
+
+    加速度:
+        静止時には重力加速度（約9.8 m/s², 鉛直下向き）が常にかかっている．
+        静止時平均を引くと，初期姿勢での重力成分がゼロになってしまう．
+        足がスイングしてセンサが傾くと各軸への重力の分配が変化するが，
+        モデルから見ると「並進加速度」と「姿勢変化による重力の回り込み」を
+        区別するアンカーが失われる．
+        深層学習モデルは「常に1Gの方向を向くベクトル」を姿勢推定の基準として
+        内部で利用するため，重力成分を残しておく方が精度が高くなる．
+        → 加速度はオフセット除去しない．
+    """
     df = df_input.copy()
     df.columns = df.columns.str.replace('kPa', 'Pressure')
-    imu_cols = [c for c in df.columns if 'Accel' in c or 'Gyro' in c]
-    if not imu_cols:
+
+    # ジャイロのみオフセット除去（加速度は対象外）
+    gyro_cols = [c for c in df.columns if 'Gyro' in c]
+    if not gyro_cols:
         return df
 
     marker_cols = [c for c in df.columns if 'Marker' in c]
@@ -315,11 +350,12 @@ def remove_imu_offset(df_input):
             start_t = rows.iloc[0]['Time (Seconds)'] - 20.0
 
     mask   = (df['Time (Seconds)'] >= start_t) & (df['Time (Seconds)'] <= start_t + 5.0)
-    static = df.loc[mask, imu_cols]
+    static = df.loc[mask, gyro_cols]
     if len(static) > 0:
-        df[imu_cols] -= static.mean()
+        df[gyro_cols] -= static.mean()
+        print(f"  ジャイロバイアス除去完了 ({len(static)} フレームを基準，加速度は重力基準を保持)")
     else:
-        print("  [WARNING] 静止区間が見つかりません（IMUオフセット除去スキップ）")
+        print("  [WARNING] 静止区間が見つかりません（ジャイロオフセット除去スキップ）")
     return df
 
 # ============================================================
@@ -422,11 +458,14 @@ def slice_strides(df, fz_col, side='Left', threshold=0.05, fs=100,
                   min_dur=0.7, max_dur=1.8):
     sig, time = df[fz_col].values, df['Time (Seconds)'].values
     hs = detect_heel_strikes(sig, threshold, int(0.4 * fs))
-    strides = [df.iloc[hs[i]:hs[i + 1]].copy()
-               for i in range(1, len(hs) - 2)
-               if min_dur <= (time[hs[i + 1]] - time[hs[i]]) <= max_dur]
+    strides, durations = [], []
+    for i in range(1, len(hs) - 2):
+        dur = time[hs[i + 1]] - time[hs[i]]
+        if min_dur <= dur <= max_dur:
+            strides.append(df.iloc[hs[i]:hs[i + 1]].copy())
+            durations.append(dur)
     print(f"  [{side}] Accepted: {len(strides)} strides")
-    return strides
+    return strides, np.array(durations, dtype=np.float32)
 
 # ============================================================
 # 10. ストライド時間正規化（200点）
@@ -451,9 +490,10 @@ def normalize_strides(stride_list, target_cols, n_points=200):
 # ============================================================
 # 11. 外れ値除去（MAD法）
 # ============================================================
-def filter_outlier_strides_mad(ensemble, stride_dfs, n_mads=3.5, ratio_thresh=0.01):
+def filter_outlier_strides_mad(ensemble, stride_dfs, durations=None, n_mads=3.5, ratio_thresh=0.01):
     if len(ensemble) == 0:
-        return ensemble, stride_dfs, np.array([], dtype=bool)
+        dur_out = np.array([], dtype=np.float32) if durations is not None else None
+        return ensemble, stride_dfs, np.array([], dtype=bool), dur_out
     median = np.median(ensemble, axis=0)
     sigma  = 1.4826 * np.median(np.abs(ensemble - median), axis=0)
     is_out = (ensemble > (median + n_mads * sigma)) | (ensemble < (median - n_mads * sigma))
@@ -462,12 +502,14 @@ def filter_outlier_strides_mad(ensemble, stride_dfs, n_mads=3.5, ratio_thresh=0.
     n_drop = (~keep).sum()
     if n_drop:
         print(f"  外れ値除去 (MAD): {n_drop}/{len(ensemble)} strides")
-    return ensemble[keep], [d for i, d in enumerate(stride_dfs) if keep[i]], keep
+    dur_out = durations[keep] if durations is not None else None
+    return ensemble[keep], [d for i, d in enumerate(stride_dfs) if keep[i]], keep, dur_out
 
 # ============================================================
 # 12. 左右統合
 # ============================================================
-def merge_left_right(left_ens, right_ens, left_cols, right_cols):
+def merge_left_right(left_ens, right_ens, left_cols, right_cols,
+                     left_dur=None, right_dur=None):
     left_d = left_ens.copy()
     for col, sign in [('Left_Accel_X', -1), ('Left_Gyro_Y', -1),
                       ('Left_Gyro_Z', -1), ('Left_Fx', -1)]:
@@ -475,8 +517,10 @@ def merge_left_right(left_ens, right_ens, left_cols, right_cols):
             left_d[:, :, left_cols.index(col)] *= sign
     merged = np.concatenate([left_d, right_ens], axis=0)
     cols   = [c.replace('Left_', '').replace('Right_', '') for c in left_cols]
+    merged_dur = (np.concatenate([left_dur, right_dur], axis=0)
+                  if left_dur is not None else None)
     print(f"  L:{left_ens.shape[0]} + R:{right_ens.shape[0]} = {merged.shape[0]} strides")
-    return merged, cols
+    return merged, cols, merged_dur
 
 # ============================================================
 # 13. 1被験者1条件の処理（並列ワーカー関数）
@@ -498,21 +542,38 @@ def _process_single(args):
         df_l_off     = remove_imu_offset(df_l)
         df_r_off     = remove_imu_offset(df_r)
 
+        # 足底圧力の体重正規化（Phase1）
+        # 【根拠】 床反力と同様に体重（N）で割ることで被験者間の体重差を除去しつつ，
+        # 「どれくらいの強さで踏み込んでいるか」という絶対的な振幅情報を保持する．
+        # センサ1〜8を同じ係数で割るため，踵・土踏まず・つま先の空間的圧力分布の
+        # 相対バランスも維持される．
+        # 条件ごとのmin-maxで正規化するとこの絶対的な踏み込み強度差が消えてしまうため，
+        # ここでは体重正規化のみを実施し，min-maxはPhase2でグローバルに行う．
+        bw = mass * 9.81  # 体重 [N]
+        pressure_cols_l = [c for c in df_l_off.columns if 'Pressure' in c]
+        pressure_cols_r = [c for c in df_r_off.columns if 'Pressure' in c]
+        if pressure_cols_l:
+            df_l_off[pressure_cols_l] /= bw
+        if pressure_cols_r:
+            df_r_off[pressure_cols_r] /= bw
+
         df_final = synchronize_merge_and_extract(
             df_l_off, df_r_off, df_angles, df_force_bw)
 
-        l_strides = slice_strides(df_final, 'Left_Fz',  'Left')
-        r_strides = slice_strides(df_final, 'Right_Fz', 'Right')
+        l_strides, l_dur = slice_strides(df_final, 'Left_Fz',  'Left')
+        r_strides, r_dur = slice_strides(df_final, 'Right_Fz', 'Right')
 
         l_dfs, l_ens = normalize_strides(l_strides, COLS_LEFT)
         r_dfs, r_ens = normalize_strides(r_strides, COLS_RIGHT)
-        l_ens, l_dfs, _ = filter_outlier_strides_mad(l_ens, l_dfs)
-        r_ens, r_dfs, _ = filter_outlier_strides_mad(r_ens, r_dfs)
+        l_ens, l_dfs, _, l_dur = filter_outlier_strides_mad(l_ens, l_dfs, l_dur)
+        r_ens, r_dfs, _, r_dur = filter_outlier_strides_mad(r_ens, r_dfs, r_dur)
 
-        merged_ens, merged_cols = merge_left_right(l_ens, r_ens, COLS_LEFT, COLS_RIGHT)
+        merged_ens, merged_cols, merged_dur = merge_left_right(
+            l_ens, r_ens, COLS_LEFT, COLS_RIGHT, l_dur, r_dur)
         print(f"✓ {participant}_{condition}: {merged_ens.shape[0]} strides")
         return dict(participant=participant, condition=condition, mass=mass,
-                    ensemble=merged_ens, columns=merged_cols)
+                    ensemble=merged_ens, columns=merged_cols,
+                    durations=merged_dur)
     except Exception as e:
         print(f"✗ {participant}_{condition}: {e}")
         return None
@@ -538,7 +599,8 @@ def process_all_data_raw(output_dir='data/interim/raw_strides', n_workers=None):
     for r in all_results:
         path = os.path.join(output_dir, f"{r['participant']}_{r['condition']}_raw.npz")
         np.savez(path, ensemble=r['ensemble'], columns=r['columns'],
-                 participant=r['participant'], condition=r['condition'], mass=r['mass'])
+                 participant=r['participant'], condition=r['condition'], mass=r['mass'],
+                 durations=r['durations'])
     return all_results
 
 # ============================================================
@@ -552,6 +614,16 @@ def _col_indices(cols):
     return p_idx, i_idx, a_idx
 
 def compute_global_stats(all_results, stats_path='data/processed/normalization_stats.npz'):
+    """
+    グローバル正規化統計量を計算して保存．
+
+    【足底圧力の統計量について】
+    8センサを独立してmin-max正規化すると，踵（高荷重）と土踏まず（低荷重）が
+    同じ0〜1スケールに引き伸ばされ，足裏全体の空間的圧力分布バランスが破壊される．
+    そのため，全センサ・全データの最大値（スカラー）で一律に割ることで
+    センサ間の相対的な強度差（空間パターン）を保持する．
+    下限は体重正規化後の物理的最小値である0を固定値として使用する．
+    """
     print("\n【Phase 2】グローバル統計量を計算中...")
     cols = all_results[0]['columns']
     p_idx, i_idx, a_idx = _col_indices(cols)
@@ -564,34 +636,72 @@ def compute_global_stats(all_results, stats_path='data/processed/normalization_s
         all_p.append(ens[:, :, p_idx].reshape(-1, len(p_idx)))
         all_i.append(ens[:, :, i_idx].reshape(-1, len(i_idx)))
 
-    all_p = np.concatenate(all_p, axis=0)
-    all_i = np.concatenate(all_i, axis=0)
-    p_min = all_p.min(axis=0)
-    p_max = all_p.max(axis=0)
+    all_p = np.concatenate(all_p, axis=0)  # (N*200, n_pressure_sensors)
+    all_i = np.concatenate(all_i, axis=0)  # (N*200, n_imu_axes)
+
+    # 足底圧力: 全センサ共通の単一スカラーmax
+    # センサごとの独立min-maxにすると空間的圧力分布が破壊されるため使わない
+    p_global_max = float(all_p.max())  # スカラー
+    # 下限はPhase1の体重正規化後，物理的に0以上が保証されるため0固定
+    p_global_min = 0.0
+
+    # IMU: 軸ごとのstd（スケール統一のみ，分布の形は保持）
     i_std = np.where(all_i.std(axis=0) < 1e-8, 1.0, all_i.std(axis=0))
 
     np.savez(stats_path,
-             pressure_min=p_min, pressure_max=p_max, imu_std=i_std,
+             pressure_global_max=np.array(p_global_max),
+             pressure_global_min=np.array(p_global_min),
+             imu_std=i_std,
              pressure_idx=np.array(p_idx), imu_idx=np.array(i_idx),
              angle_idx=np.array(a_idx), columns=np.array(cols))
+
+    print(f"  圧力 global_max: {p_global_max:.6f} [%BW/kPa相当]")
+    print(f"  IMU std (軸ごと): {i_std.round(4)}")
     print(f"  保存: {stats_path}")
     print(f"  ★ train/val/test分割後は train のみで再実行してください")
-    return dict(pressure_min=p_min, pressure_max=p_max, imu_std=i_std,
-                pressure_idx=p_idx, imu_idx=i_idx, angle_idx=a_idx)
+
+    return dict(pressure_global_max=p_global_max, pressure_global_min=p_global_min,
+                imu_std=i_std, pressure_idx=p_idx, imu_idx=i_idx, angle_idx=a_idx)
 
 # ============================================================
 # 16. Phase 3 & 4: 正規化適用 → 保存
 # ============================================================
 def apply_global_normalization(ensemble, stats):
-    ens     = ensemble.copy()
-    p_idx   = stats['pressure_idx']
-    i_idx   = stats['imu_idx']
-    a_idx   = stats['angle_idx']
-    p_range = np.where((stats['pressure_max'] - stats['pressure_min']) < 1e-8,
-                       1.0, stats['pressure_max'] - stats['pressure_min'])
-    ens[:, :, p_idx] = (ens[:, :, p_idx] - stats['pressure_min']) / p_range
+    """
+    グローバル統計量を適用して正規化する．
+
+    【足底圧力】
+    全センサ共通のスカラーmaxで割る（下限は0固定）．
+    センサ間の空間的圧力分布バランスを維持するため，センサごとのmin-maxは使わない．
+    train maxを超える値（強歩・外れ値など）はclipで[0, 1]に飽和させる．
+
+    【IMU】
+    軸ごとのグローバルstdで割る（ジャイロはバイアス除去済み，加速度は重力基準保持）．
+
+    【関節角度（出力ターゲット）】
+    /180 の固定定数スケーリング（逆変換: pred_deg = pred_norm × 180）．
+
+    【床反力】
+    体重正規化済み [%BW]のままスケーリングしない．
+    """
+    ens   = ensemble.copy()
+    p_idx = stats['pressure_idx']
+    i_idx = stats['imu_idx']
+    a_idx = stats['angle_idx']
+
+    # 足底圧力: 全センサ共通maxで割り，[0, 1]にクリッピング
+    p_max = float(stats['pressure_global_max'])
+    p_min = float(stats['pressure_global_min'])
+    p_range = p_max - p_min if (p_max - p_min) > 1e-8 else 1.0
+    ens[:, :, p_idx] = (ens[:, :, p_idx] - p_min) / p_range
+    ens[:, :, p_idx] = np.clip(ens[:, :, p_idx], 0.0, 1.0)  # 飽和処理
+
+    # IMU: 軸ごとのグローバルstdで割る
     ens[:, :, i_idx] = ens[:, :, i_idx] / stats['imu_std']
+
+    # 関節角度: /180 固定定数
     ens[:, :, a_idx] = ens[:, :, a_idx] / ANGLE_SCALE
+
     return ens
 
 def save_normalized_dataset(all_results, stats, output_dir='data/processed/normalized'):
@@ -600,16 +710,18 @@ def save_normalized_dataset(all_results, stats, output_dir='data/processed/norma
     p_map    = {name: i for i, name in enumerate(unique_p)}
     c_map    = {'h': 0, 'm': 1, 'l': 2}
 
-    all_ens, all_ids, all_conds = [], [], []
+    all_ens, all_ids, all_conds, all_durs = [], [], [], []
     for r in all_results:
         norm = apply_global_normalization(r['ensemble'], stats)
         np.savez(os.path.join(output_dir, f"{r['participant']}_{r['condition']}_norm.npz"),
                  ensemble=norm, columns=r['columns'],
-                 participant=r['participant'], condition=r['condition'], mass=r['mass'])
+                 participant=r['participant'], condition=r['condition'], mass=r['mass'],
+                 durations=r['durations'])
         n = norm.shape[0]
         all_ens.append(norm)
         all_ids.append(np.full(n, p_map[r['participant']]))
         all_conds.append(np.full(n, c_map[r['condition']]))
+        all_durs.append(r['durations'])
 
     combined = np.concatenate(all_ens, axis=0)
     combined_path = os.path.join(output_dir, 'all_data_combined.npz')
@@ -617,6 +729,7 @@ def save_normalized_dataset(all_results, stats, output_dir='data/processed/norma
              ensemble      = combined,
              subject_ids   = np.concatenate(all_ids,   axis=0),
              condition_ids = np.concatenate(all_conds, axis=0),
+             durations     = np.concatenate(all_durs,  axis=0),
              columns       = all_results[0]['columns'],
              id_map        = p_map,
              condition_map = c_map,
