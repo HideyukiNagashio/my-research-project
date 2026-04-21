@@ -1,5 +1,6 @@
 import os
 import json
+import pickle
 import time
 import datetime
 import argparse
@@ -35,7 +36,24 @@ def get_dimensions(input_type, target_type):
     else: raise ValueError(f"Unknown target_type {target_type}")
 
     return in_dim, out_dim
+    return in_dim, out_dim
 
+def get_input_feature_names(input_type):
+    ipsi_press = [f"P{i}" for i in range(1, 9)]
+    ipsi_imu = ["AccX", "AccY", "AccZ", "GyroX", "GyroY", "GyroZ"]
+    ipsi = ipsi_press + ipsi_imu
+    
+    contra_press = [f"Contra_P{i}" for i in range(1, 9)]
+    contra_imu = ["Contra_AccX", "Contra_AccY", "Contra_AccZ", "Contra_GyroX", "Contra_GyroY", "Contra_GyroZ"]
+    contra = contra_press + contra_imu
+    
+    if input_type == 'single_leg': return ipsi
+    elif input_type == 'bilateral': return ipsi + contra
+    elif input_type == 'pressure_single': return ipsi_press
+    elif input_type == 'pressure_bilateral': return ipsi_press + contra_press
+    elif input_type == 'imu_single': return ipsi_imu
+    elif input_type == 'imu_bilateral': return ipsi_imu + contra_imu
+    else: return []
 def get_feature_names(target_type):
     angles = ['Hip_Flex', 'Hip_Abd', 'Hip_Rot', 'Knee_Flex', 'Knee_Abd', 'Knee_Rot', 'Ankle_Flex', 'Ankle_Abd', 'Ankle_Rot']
     grf = ['Fx', 'Fy', 'Fz']
@@ -68,6 +86,15 @@ def main():
     # 設定の保存
     with open(os.path.join(exp_dir, 'config.json'), 'w') as f:
         json.dump(vars(args), f, indent=4)
+        
+    try:
+        with open(os.path.join(exp_dir, 'feature_names.json'), 'w') as f:
+            json.dump(get_input_feature_names(args.input_type), f, indent=4)
+        with open(os.path.join(exp_dir, 'target_names.json'), 'w') as f:
+            json.dump(get_feature_names(args.target_type), f, indent=4)
+        print("Saved feature_names.json and target_names.json")
+    except Exception as e:
+        print(f"Warning: could not save feature/target names: {e}")
         
     cv_metrics = []
     all_per_feat_metrics = []
@@ -137,6 +164,52 @@ def main():
         # テストセットを用いた評価
         print(f"\n--- Evaluating Fold {fold} on Test Set ---")
         test_metrics, preds, targets = trainer.evaluate(test_loader)
+        
+        # --- 予測、ターゲット、入力のアレイ保存 ---
+        try:
+            all_inputs = []
+            for batch_x, batch_y in test_loader:
+                all_inputs.append(batch_x.cpu().numpy())
+            inputs_array = np.concatenate(all_inputs, axis=0)
+            
+            np.save(os.path.join(exp_dir, f'inputs_fold{fold}.npy'), inputs_array)
+            np.save(os.path.join(exp_dir, f'preds_fold{fold}.npy'), preds)
+            np.save(os.path.join(exp_dir, f'targets_fold{fold}.npy'), targets)
+        except Exception as e:
+            print(f"Warning: could not save npy arrays: {e}")
+            
+        # --- メタデータの保存 ---
+        try:
+            with open(os.path.join(fold_dir, 'test.pkl'), 'rb') as f:
+                test_data = pickle.load(f)
+                
+            sub_ids = test_data.get('subject_ids')
+            cond_ids = test_data.get('condition_ids')
+            id_map = test_data.get('id_map', {})
+            cond_map = test_data.get('condition_map', {})
+            inv_id_map = {v: k for k, v in id_map.items()}
+            inv_cond_map = {v: k for k, v in cond_map.items()}
+            
+            if sub_ids is not None and cond_ids is not None:
+                sub_names = [inv_id_map.get(i, "") for i in sub_ids]
+                cond_names = [inv_cond_map.get(i, "") for i in cond_ids]
+                df_meta = pd.DataFrame({
+                    'sample_index': np.arange(len(sub_ids)),
+                    'subject_id': sub_ids,
+                    'subject_name': sub_names,
+                    'condition_id': cond_ids,
+                    'condition_name': cond_names
+                })
+                meta_path = os.path.join(exp_dir, f'sample_meta_fold{fold}.csv')
+                df_meta.to_csv(meta_path, index=False)
+        except Exception as e:
+            print(f"Warning: could not save sample_meta_fold{fold}.csv: {e}")
+            
+        print("Saved:")
+        print(f"  - preds_fold{fold}.npy")
+        print(f"  - targets_fold{fold}.npy")
+        print(f"  - inputs_fold{fold}.npy")
+        print(f"  - sample_meta_fold{fold}.csv")
         
         # 特徴量別のMetrics抽出および保存
         if 'per_feature' in test_metrics:
