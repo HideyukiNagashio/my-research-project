@@ -36,7 +36,6 @@ def get_dimensions(input_type, target_type):
     else: raise ValueError(f"Unknown target_type {target_type}")
 
     return in_dim, out_dim
-    return in_dim, out_dim
 
 def get_input_feature_names(input_type):
     ipsi_press = [f"P{i}" for i in range(1, 9)]

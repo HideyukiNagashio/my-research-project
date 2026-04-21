@@ -9,6 +9,8 @@ __pycache__/
 *.csv
 # データファイル (NumPy)
 *.npz
+# データファイル (NumPyの生データ)
+*.npy
 # データファイル (PyTorch)
 *.pth
 *.png
