@@ -1,0 +1,21 @@
+{
+    "exp_name": "first_test",
+    "seed": 42,
+    "data_dir": "data/processed/cv",
+    "input_type": "single_leg",
+    "target_type": "grf_only",
+    "model_type": "cnn",
+    "d_model": 128,
+    "nhead": 4,
+    "dim_feedforward": 256,
+    "hidden_dim": 256,
+    "kernel_size": 5,
+    "num_layers": 3,
+    "dropout": 0.3,
+    "epochs": 5,
+    "batch_size": 128,
+    "lr": 0.001,
+    "patience": 20,
+    "factor": 0.5,
+    "use_weighted_loss": false
+}
