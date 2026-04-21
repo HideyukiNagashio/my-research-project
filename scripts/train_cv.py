@@ -36,6 +36,18 @@ def get_dimensions(input_type, target_type):
 
     return in_dim, out_dim
 
+def get_feature_names(target_type):
+    angles = ['Hip_Flex', 'Hip_Abd', 'Hip_Rot', 'Knee_Flex', 'Knee_Abd', 'Knee_Rot', 'Ankle_Flex', 'Ankle_Abd', 'Ankle_Rot']
+    grf = ['Fx', 'Fy', 'Fz']
+    if target_type == 'angles_only':
+        return angles
+    elif target_type == 'grf_only':
+        return grf
+    elif target_type == 'all':
+        return angles + grf
+    else:
+        raise ValueError(f"Unknown target_type {target_type}")
+
 def main():
     parser = get_args_parser()
     args = parser.parse_args()
@@ -58,6 +70,7 @@ def main():
         json.dump(vars(args), f, indent=4)
         
     cv_metrics = []
+    all_per_feat_metrics = []
     
     # 6-Fold クロスバリデーションの実行
     for fold in range(1, 7):
@@ -124,6 +137,18 @@ def main():
         # テストセットを用いた評価
         print(f"\n--- Evaluating Fold {fold} on Test Set ---")
         test_metrics, preds, targets = trainer.evaluate(test_loader)
+        
+        # 特徴量別のMetrics抽出および保存
+        if 'per_feature' in test_metrics:
+            per_feat_metrics = test_metrics.pop('per_feature')
+            if len(per_feat_metrics) > 0:
+                feat_df = pd.DataFrame(per_feat_metrics)
+                feat_df.insert(0, 'feature', get_feature_names(args.target_type))
+                feat_df.to_csv(os.path.join(exp_dir, f'feature_metrics_fold{fold}.csv'), index=False)
+                
+                feat_df['fold'] = fold
+                all_per_feat_metrics.append(feat_df)
+            
         test_metrics['fold'] = fold
         cv_metrics.append(test_metrics)
         print(f"Test RMSE: {test_metrics['rmse']:.4f} | R2: {test_metrics['r2']:.4f}")
@@ -150,6 +175,26 @@ def main():
     
     summary_path = os.path.join(exp_dir, 'summary.csv')
     df_metrics.to_csv(summary_path, index=False)
+    
+    # === feature_summary.csv の作成 ===
+    if len(all_per_feat_metrics) > 0:
+        all_feat_df = pd.concat(all_per_feat_metrics, ignore_index=True)
+        # 集計用に使った fold 列は消す
+        all_feat_df.drop(columns=['fold'], inplace=True, errors='ignore')
+        
+        # featureでグループ化して平均と標準偏差を計算
+        feature_summary = all_feat_df.groupby('feature', sort=False).agg(['mean', 'std'])
+        # MultiIndexの列名（RMSEのMeanなど）を結合
+        feature_summary.columns = [f"{col[0]}_{col[1]}" for col in feature_summary.columns]
+        feature_summary.reset_index(inplace=True)
+        
+        # 元の特徴量順序通りにソートする
+        ordered_features = get_feature_names(args.target_type)
+        feature_summary['feature'] = pd.Categorical(feature_summary['feature'], categories=ordered_features, ordered=True)
+        feature_summary = feature_summary.sort_values('feature')
+        
+        feature_summary.to_csv(os.path.join(exp_dir, 'feature_summary.csv'), index=False)
+
     print(f"\n{'='*40}")
     print(f"Cross Validation Complete!")
     print(f"Mean R2  : {summary_stats.loc['mean', 'r2']:.4f} ± {summary_stats.loc['std', 'r2']:.4f}")
