@@ -144,14 +144,16 @@ def main():
             if len(per_feat_metrics) > 0:
                 feat_df = pd.DataFrame(per_feat_metrics)
                 feat_df.insert(0, 'feature', get_feature_names(args.target_type))
-                feat_df.to_csv(os.path.join(exp_dir, f'feature_metrics_fold{fold}.csv'), index=False)
+                feat_df.to_csv(os.path.join(exp_dir, f'feature_metrics_fold{fold}.csv'), index=False, float_format='%.4f')
+                
+                print(f"\n--- Fold {fold} Feature Metrics ---")
+                print(feat_df.round(4).to_string(index=False))
                 
                 feat_df['fold'] = fold
                 all_per_feat_metrics.append(feat_df)
             
         test_metrics['fold'] = fold
         cv_metrics.append(test_metrics)
-        print(f"Test RMSE: {test_metrics['rmse']:.4f} | R2: {test_metrics['r2']:.4f}")
         
         # 学習曲線の保存
         plt.figure(figsize=(8, 6))
@@ -164,17 +166,6 @@ def main():
         plt.grid(True)
         plt.savefig(os.path.join(exp_dir, f'learning_curve_fold{fold}.png'))
         plt.close()
-        
-    # CV全体の集計 (summary.csv の作成)
-    df_metrics = pd.DataFrame(cv_metrics)
-    
-    # 各指標のMeanとStdを新しい行として追加
-    summary_stats = df_metrics.agg(['mean', 'std'])
-    summary_stats['fold'] = ['mean', 'std']
-    df_metrics = pd.concat([df_metrics, summary_stats], ignore_index=True)
-    
-    summary_path = os.path.join(exp_dir, 'summary.csv')
-    df_metrics.to_csv(summary_path, index=False)
     
     # === feature_summary.csv の作成 ===
     if len(all_per_feat_metrics) > 0:
@@ -193,13 +184,14 @@ def main():
         feature_summary['feature'] = pd.Categorical(feature_summary['feature'], categories=ordered_features, ordered=True)
         feature_summary = feature_summary.sort_values('feature')
         
-        feature_summary.to_csv(os.path.join(exp_dir, 'feature_summary.csv'), index=False)
+        feature_summary.to_csv(os.path.join(exp_dir, 'feature_summary.csv'), index=False, float_format='%.4f')
 
     print(f"\n{'='*40}")
-    print(f"Cross Validation Complete!")
-    print(f"Mean R2  : {summary_stats.loc['mean', 'r2']:.4f} ± {summary_stats.loc['std', 'r2']:.4f}")
-    print(f"Mean RMSE: {summary_stats.loc['mean', 'rmse']:.4f} ± {summary_stats.loc['std', 'rmse']:.4f}")
-    print(f"Results saved to: {exp_dir}")
+    print("Cross Validation Complete!")
+    print("\n--- Feature Summary (Mean ± Std) ---")
+    if len(all_per_feat_metrics) > 0:
+        print(feature_summary.round(4).to_string(index=False))
+    print(f"\nResults saved to: {exp_dir}")
     print(f"{'='*40}")
 
 if __name__ == '__main__':
