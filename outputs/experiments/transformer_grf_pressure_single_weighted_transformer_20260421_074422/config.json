@@ -1,0 +1,21 @@
+{
+    "exp_name": "transformer_grf_pressure_single_weighted",
+    "seed": 42,
+    "data_dir": "data/processed/cv",
+    "input_type": "pressure_single",
+    "target_type": "grf_only",
+    "model_type": "transformer",
+    "d_model": 128,
+    "nhead": 4,
+    "dim_feedforward": 256,
+    "hidden_dim": 256,
+    "kernel_size": 5,
+    "num_layers": 3,
+    "dropout": 0.1,
+    "epochs": 200,
+    "batch_size": 512,
+    "lr": 0.001,
+    "patience": 20,
+    "factor": 0.5,
+    "use_weighted_loss": true
+}
