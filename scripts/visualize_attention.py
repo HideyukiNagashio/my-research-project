@@ -348,56 +348,35 @@ def compute_global_vmax(attention_maps: list) -> float:
 # Visualization & Drawing Helpers
 # ==========================================
 
-def draw_gait_phase_elements(ax, seq_len: int, boundaries: dict, downsample_ratio: float = 1.0):
+def draw_gait_phase_elements(ax, n_bins: int, boundaries_pct: dict):
     """
-    Draws horizontal/vertical lines and labels for gait phases on a heatmap axis.
-    X-axis represents Query (current step). Y-axis represents Key (referred step).
-    """
-    # Scale boundaries to downsampled coordinates
-    scaled_boundaries = {}
-    for name, (start, end) in boundaries.items():
-        scaled_boundaries[name] = (start / downsample_ratio, end / downsample_ratio)
-        
-    scaled_seq_len = seq_len / downsample_ratio
+    Draws horizontal/vertical dashed lines for gait phase boundaries on a heatmap axis.
+    The boundaries are scaled dynamically to the current number of bins.
     
-    # Draw boundary lines (excluding limits)
-    ends = sorted(list(set([end for _, end in scaled_boundaries.values()])))
-    for end_step in ends:
-        if 0 < end_step < scaled_seq_len:
+    Args:
+        ax: matplotlib axis
+        n_bins: number of spatial bins/pixels in the current heatmap (e.g. 200, 50, 25)
+        boundaries_pct: dict mapping phase name -> (start_pct, end_pct)
+    """
+    ends_pct = sorted(list(set([end for _, end in boundaries_pct.values()])))
+    for pct in ends_pct:
+        if 0.0 < pct < 100.0:
+            idx = pct * n_bins / 100.0
             # Vertical line (Query boundary)
-            ax.axvline(end_step, color='white', linestyle='--', alpha=0.5, linewidth=1.0)
+            ax.axvline(idx, color='white', linestyle='--', alpha=0.5, linewidth=1.0)
             # Horizontal line (Key boundary)
-            ax.axhline(end_step, color='white', linestyle='--', alpha=0.5, linewidth=1.0)
-            
-    # Overlay text labels for phases
-    for name, (start, end) in scaled_boundaries.items():
-        mid = (start + end) / 2.0
-        
-        # Query labels (X-axis, near top border)
-        ax.text(
-            mid, scaled_seq_len - (scaled_seq_len * 0.05), name,
-            color='yellow', ha='center', va='center',
-            fontsize=8, fontweight='bold', alpha=0.9,
-            bbox=dict(facecolor='black', alpha=0.5, boxstyle='round,pad=0.2', edgecolor='none')
-        )
-        
-        # Key labels (Y-axis, near right border, rotated)
-        ax.text(
-            scaled_seq_len - (scaled_seq_len * 0.05), mid, name,
-            color='yellow', ha='center', va='center',
-            fontsize=8, fontweight='bold', alpha=0.9, rotation=90,
-            bbox=dict(facecolor='black', alpha=0.5, boxstyle='round,pad=0.2', edgecolor='none')
-        )
+            ax.axhline(idx, color='white', linestyle='--', alpha=0.5, linewidth=1.0)
 
 
 def plot_single_heatmap(ax, matrix: np.ndarray, title: str, vmin: float = 0.0, vmax: float = None, 
-                        boundaries: dict = None, seq_len: int = None, downsample_ratio: float = 1.0):
+                        boundaries_pct: dict = None):
     """
     Helper to plot a transposed heatmap (Query on X-axis, Key on Y-axis).
+    Row represents Key, Column represents Query.
     """
     # Transpose map: shape (Query, Key) -> (Key, Query)
-    # Row represents Key, Column represents Query
     matrix_t = matrix.T
+    n_bins = matrix_t.shape[0]
     
     sns.heatmap(
         matrix_t,
@@ -409,12 +388,19 @@ def plot_single_heatmap(ax, matrix: np.ndarray, title: str, vmin: float = 0.0, v
         vmax=vmax
     )
     ax.set_title(title, fontsize=11, fontweight='bold')
-    ax.set_xlabel("Query (Current Timestep)", fontsize=9)
-    ax.set_ylabel("Key (Attended Timestep)", fontsize=9)
-    ax.invert_yaxis() # Bottom is index 0
+    ax.set_xlabel("Query (% Gait Cycle)", fontsize=10)
+    ax.set_ylabel("Key (% Gait Cycle)", fontsize=10)
+    ax.invert_yaxis()
     
-    if boundaries and seq_len:
-        draw_gait_phase_elements(ax, seq_len, boundaries, downsample_ratio)
+    ticks = [0.0, 0.25 * n_bins, 0.50 * n_bins, 0.75 * n_bins, 1.0 * n_bins]
+    labels = ['0', '25', '50', '75', '100']
+    ax.set_xticks(ticks)
+    ax.set_xticklabels(labels)
+    ax.set_yticks(ticks)
+    ax.set_yticklabels(labels)
+    
+    if boundaries_pct:
+        draw_gait_phase_elements(ax, n_bins, boundaries_pct)
 
 
 # ==========================================
@@ -602,8 +588,7 @@ def main():
             fig_l, ax_l = plt.subplots(figsize=(6, 5))
             plot_single_heatmap(
                 ax_l, l_avg, f"Layer {l_idx+1} Mean (Sample {s_idx})",
-                vmin=0.0, vmax=vmax, boundaries=boundaries, seq_len=seq_len,
-                downsample_ratio=downsample_ratio
+                vmin=0.0, vmax=vmax, boundaries_pct=gait_phases
             )
             fig_l.savefig(
                 os.path.join(output_base, "layerwise", f"layer{l_idx+1}_sample{s_idx}.png"),
@@ -621,8 +606,7 @@ def main():
                 fig_h, ax_h = plt.subplots(figsize=(6, 5))
                 plot_single_heatmap(
                     ax_h, h_map, f"Layer {l_idx+1} Head {h_idx} (Sample {s_idx})",
-                    vmin=0.0, vmax=vmax, boundaries=boundaries, seq_len=seq_len,
-                    downsample_ratio=downsample_ratio
+                    vmin=0.0, vmax=vmax, boundaries_pct=gait_phases
                 )
                 fig_h.savefig(
                     os.path.join(output_base, "headwise", f"layer{l_idx+1}_head{h_idx}_sample{s_idx}.png"),
@@ -663,8 +647,7 @@ def main():
         fig_r, ax_r = plt.subplots(figsize=(6, 5))
         plot_single_heatmap(
             ax_r, s_rollout, f"Attention Rollout (Sample {s_idx}, Head: {args.head_idx})",
-            vmin=0.0, vmax=vmax, boundaries=boundaries, seq_len=seq_len,
-            downsample_ratio=downsample_ratio
+            vmin=0.0, vmax=vmax, boundaries_pct=gait_phases
         )
         fig_r.savefig(
             os.path.join(output_base, "rollout", f"rollout_sample{s_idx}.png"),
@@ -706,8 +689,7 @@ def main():
             ax = fig.add_subplot(gs[0, l_idx])
             plot_single_heatmap(
                 ax, layer_averages[l_idx], f"Layer {l_idx+1} Attention Map (Head: {args.head_idx})",
-                vmin=0.0, vmax=vmax, boundaries=boundaries, seq_len=seq_len,
-                downsample_ratio=downsample_ratio
+                vmin=0.0, vmax=vmax, boundaries_pct=gait_phases
             )
             
         # 2. Vertical GRF (Fz) Overlay
@@ -834,8 +816,7 @@ def main():
             fig_l, ax_l = plt.subplots(figsize=(6, 5))
             plot_single_heatmap(
                 ax_l, agg_m, f"Aggregated Layer {l_idx+1} Mean (N={num_samples})",
-                vmin=0.0, vmax=vmax, boundaries=boundaries, seq_len=seq_len,
-                downsample_ratio=downsample_ratio
+                vmin=0.0, vmax=vmax, boundaries_pct=gait_phases
             )
             fig_l.savefig(
                 os.path.join(output_base, "layerwise", f"layer{l_idx+1}_mean_aggregate.png"),
@@ -869,8 +850,7 @@ def main():
         fig_r, ax_r = plt.subplots(figsize=(6, 5))
         plot_single_heatmap(
             ax_r, agg_rollout, f"Aggregated Rollout (N={num_samples}, Head: {args.head_idx})",
-            vmin=0.0, vmax=vmax, boundaries=boundaries, seq_len=seq_len,
-            downsample_ratio=downsample_ratio
+            vmin=0.0, vmax=vmax, boundaries_pct=gait_phases
         )
         
         filter_suffix = ""
@@ -894,8 +874,7 @@ def main():
             ax = fig.add_subplot(gs[0, l_idx])
             plot_single_heatmap(
                 ax, layer_averages[l_idx], f"Aggregated Layer {l_idx+1} Attention Map (Head: {args.head_idx})",
-                vmin=0.0, vmax=vmax, boundaries=boundaries, seq_len=seq_len,
-                downsample_ratio=downsample_ratio
+                vmin=0.0, vmax=vmax, boundaries_pct=gait_phases
             )
             
         # Average Fz Waveform with Overlay
