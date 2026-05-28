@@ -525,7 +525,7 @@ def main():
     
     # 6. Initialize output subdirectories
     output_base = args.output_dir if args.output_dir else os.path.join(args.exp_dir, "attention_plots")
-    subdirs = ["summary", "layerwise", "headwise", "rollout", "phase_matrix"]
+    subdirs = ["layerwise", "headwise", "rollout", "phase_matrix"]
     for sd in subdirs:
         os.makedirs(os.path.join(output_base, sd), exist_ok=True)
         
@@ -700,35 +700,7 @@ def main():
         )
         plt.close(fig_l_prof)
 
-        # ------------------------------------------
-        # D. Save Summary Figure (2x3 Grid Heatmaps Only)
-        # ------------------------------------------
-        fig = plt.figure(figsize=(18, 10), constrained_layout=True)
-        gs = gridspec.GridSpec(2, 3, figure=fig, height_ratios=[1.0, 1.0])
-        
-        # 1. 2D Heatmaps for Layer Averages (Row 0)
-        for l_idx in range(num_layers):
-            ax = fig.add_subplot(gs[0, l_idx])
-            plot_single_heatmap(
-                ax, layer_averages[l_idx], f"Layer {l_idx+1} Attention Map (Head: {args.head_idx})",
-                vmin=0.0, vmax=vmax, boundaries_pct=gait_phases
-            )
-            
-        # 2. 2D Heatmap for Attention Rollout (Row 1)
-        ax_r_summary = fig.add_subplot(gs[1, :])
-        plot_single_heatmap(
-            ax_r_summary, s_rollout, f"Attention Rollout (Head: {args.head_idx})",
-            vmin=0.0, vmax=vmax, boundaries_pct=gait_phases
-        )
-        
-        title_meta = f"_fold{args.fold}_sample{s_idx}_{sub_name}_{cond_name}"
-        plt.suptitle(f"Biomechanical Attention Analysis (Sample Index: {s_idx})", fontsize=16, fontweight='bold', y=0.99)
-        fig.savefig(
-            os.path.join(output_base, "summary", f"attention_single{title_meta}.{args.save_format}"),
-            dpi=300, bbox_inches='tight'
-        )
-        print(f"Saved summary figure: {os.path.join(output_base, 'summary', f'attention_single{title_meta}.{args.save_format}')}")
-        plt.close(fig)
+
 
     elif args.mode == "aggregate":
         # ------------------------------------------
@@ -900,36 +872,7 @@ def main():
         )
         plt.close(fig_layers)
 
-        # ------------------------------------------
-        # 4. Save Aggregated Summary Figure (2x3 Grid Heatmaps Only)
-        # ------------------------------------------
-        fig = plt.figure(figsize=(18, 10), constrained_layout=True)
-        gs = gridspec.GridSpec(2, 3, figure=fig, height_ratios=[1.0, 1.0])
-        
-        # Heatmaps for layers (Row 0)
-        for l_idx in range(num_layers):
-            ax = fig.add_subplot(gs[0, l_idx])
-            plot_single_heatmap(
-                ax, layer_averages[l_idx], f"Aggregated Layer {l_idx+1} Attention Map (Head: {args.head_idx})",
-                vmin=0.0, vmax=vmax, boundaries_pct=gait_phases
-            )
-            
-        # Aggregated Rollout (Row 1)
-        ax_r_summary = fig.add_subplot(gs[1, :])
-        plot_single_heatmap(
-            ax_r_summary, agg_rollout, f"Aggregated Rollout (Head: {args.head_idx})",
-            vmin=0.0, vmax=vmax, boundaries_pct=gait_phases
-        )
-        
-        title_str = f"Aggregated Biomechanical Attention Analysis (N={num_samples} Strides)"
-        if filter_desc:
-            title_str += f" - {filter_desc}"
-        plt.suptitle(title_str, fontsize=16, fontweight='bold', y=0.99)
-        
-        save_path = os.path.join(output_base, "summary", f"attention_aggregate_fold{args.fold}{filter_suffix}.{args.save_format}")
-        fig.savefig(save_path, dpi=300, bbox_inches='tight')
-        print(f"Saved aggregated summary figure: {save_path}")
-        plt.close(fig)
+
 
     # 8. Interactive Show Check
     if not args.no_show:
