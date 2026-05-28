@@ -311,7 +311,8 @@ def plot_single_sample(sample_idx, inputs, preds, targets, attention_maps, featu
             yticklabels=20
         )
         ax.set_title(f"Layer {layer_idx + 1} Attention Map (Head: {head_idx})", fontsize=12, fontweight='bold')
-        ax.set_ylabel("Key (Attended Timestep)", fontsize=10)
+        ax.set_xlabel("Query (Source Timestep)", fontsize=9)
+        ax.set_ylabel("Key (Attended Timestep)", fontsize=9)
         ax.invert_yaxis()
 
     # --- Row 2: vertical GRF (Fz) ---
