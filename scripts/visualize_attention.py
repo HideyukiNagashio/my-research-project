@@ -655,36 +655,58 @@ def main():
         )
         plt.close(fig_r)
         
-        # Save Rollout Profiles
-        # Key-wise profile (axis=0 of transposed rollout i.e. Key index)
-        # Query-wise profile (axis=1 of transposed rollout i.e. Query index)
+        # Save Rollout Profile (Key-wise Profile only)
         transposed_rollout = s_rollout.T # (Key, Query)
         key_profile = np.mean(transposed_rollout, axis=1) # Mean over Query
-        query_profile = np.mean(transposed_rollout, axis=0) # Mean over Key
-        time_steps = np.arange(len(key_profile)) * downsample_ratio
+        gait_cycle_pct = np.linspace(0, 100, len(key_profile))
         
         fig_prof, ax_prof = plt.subplots(figsize=(10, 4))
-        ax_prof.plot(time_steps, key_profile, 'b-', linewidth=2.0, label="Key-wise Profile (Importance as Reference)")
-        ax_prof.plot(time_steps, query_profile, 'r--', linewidth=2.0, label="Query-wise Profile (Information Search Breadth)")
-        ax_prof.set_title(f"Attention Rollout Profiles (Sample {s_idx})", fontsize=12, fontweight='bold')
-        ax_prof.set_xlabel("Time step", fontsize=10)
+        ax_prof.plot(gait_cycle_pct, key_profile, 'b-', linewidth=2.0, label="Key-wise Profile (Importance as Reference)")
+        ax_prof.set_title("Rollout Attention Profile Over Time", fontsize=12, fontweight='bold')
+        ax_prof.set_xlabel("Key (% Gait Cycle)", fontsize=10)
         ax_prof.set_ylabel("Attention Weight", fontsize=10)
         ax_prof.grid(True, linestyle=":", alpha=0.6)
         ax_prof.legend()
-        ax_prof.set_xlim(0, seq_len - 1)
+        ax_prof.set_xlim(0, 100)
+        ax_prof.set_xticks([0, 25, 50, 75, 100])
         fig_prof.savefig(
             os.path.join(output_base, "rollout", f"rollout_profile_sample{s_idx}.png"),
             dpi=300, bbox_inches='tight'
         )
         plt.close(fig_prof)
 
+        # Save Attention Profile per Layer (Single mode standalone)
+        fig_l_prof, ax_l_prof = plt.subplots(figsize=(10, 4))
+        colors = ["tab:blue", "tab:orange", "tab:green"]
+        for l_idx in range(num_layers):
+            l_profile = np.mean(layer_averages[l_idx], axis=0) # Mean over Query
+            gait_cycle_pct_l = np.linspace(0, 100, len(l_profile))
+            ax_l_prof.plot(
+                gait_cycle_pct_l, l_profile,
+                label=f"Layer {l_idx + 1}",
+                color=colors[l_idx % len(colors)],
+                linewidth=2.0
+            )
+        ax_l_prof.set_title("Attention Profile per Layer", fontsize=12, fontweight='bold')
+        ax_l_prof.set_xlabel("Key (% Gait Cycle)", fontsize=10)
+        ax_l_prof.set_ylabel("Key-wise Attention Mean", fontsize=10)
+        ax_l_prof.grid(True, linestyle=":", alpha=0.6)
+        ax_l_prof.legend(loc="upper right")
+        ax_l_prof.set_xlim(0, 100)
+        ax_l_prof.set_xticks([0, 25, 50, 75, 100])
+        fig_l_prof.savefig(
+            os.path.join(output_base, "rollout", f"layer_attention_profile_sample{s_idx}.png"),
+            dpi=300, bbox_inches='tight'
+        )
+        plt.close(fig_l_prof)
+
         # ------------------------------------------
-        # D. Save Summary Figure (Combined)
+        # D. Save Summary Figure (2x3 Grid Heatmaps Only)
         # ------------------------------------------
-        fig = plt.figure(figsize=(18, 14), constrained_layout=True)
-        gs = gridspec.GridSpec(4, 3, figure=fig, height_ratios=[1.2, 1.0, 1.0, 1.0])
+        fig = plt.figure(figsize=(18, 10), constrained_layout=True)
+        gs = gridspec.GridSpec(2, 3, figure=fig, height_ratios=[1.0, 1.0])
         
-        # 1. 2D Heatmaps for Layer Averages
+        # 1. 2D Heatmaps for Layer Averages (Row 0)
         for l_idx in range(num_layers):
             ax = fig.add_subplot(gs[0, l_idx])
             plot_single_heatmap(
@@ -692,95 +714,12 @@ def main():
                 vmin=0.0, vmax=vmax, boundaries_pct=gait_phases
             )
             
-        # 2. Vertical GRF (Fz) Overlay
-        ax_fz = fig.add_subplot(gs[1, :])
-        fz_idx = target_names.index("Fz") if "Fz" in target_names else min(2, targets.shape[2] - 1)
-        time_steps_raw = np.arange(seq_len)
-        
-        ax_fz.plot(time_steps_raw, targets[s_idx, :, fz_idx], 'k-', label="Ground Truth (Fz)", linewidth=2.5)
-        ax_fz.plot(time_steps_raw, preds[s_idx, :, fz_idx], 'r--', label="Predicted (Fz)", linewidth=2.0)
-        ax_fz.set_ylabel("Vertical GRF (Fz) [N]", color="k", fontsize=11, fontweight='bold')
-        ax_fz.tick_params(axis='y', labelcolor="k")
-        ax_fz.grid(True, linestyle=":", alpha=0.6)
-        
-        # Overlay Mean Attention key-wise profile
-        ax_fz_twin = ax_fz.twinx()
-        raw_key_profiles = [np.mean(np.mean(attention_maps[l][s_idx], axis=0), axis=0) for l in range(num_layers)]
-        mean_raw_profile = np.mean(raw_key_profiles, axis=0)
-        
-        ax_fz_twin.fill_between(time_steps_raw, 0, mean_raw_profile, color="tab:blue", alpha=0.25, label="Mean Attention Weight")
-        ax_fz_twin.plot(time_steps_raw, mean_raw_profile, color="tab:blue", linewidth=1.5, alpha=0.7)
-        ax_fz_twin.set_ylabel("Attention Weight (Key Mean)", color="tab:blue", fontsize=11, fontweight='bold')
-        ax_fz_twin.tick_params(axis='y', labelcolor="tab:blue")
-        
-        h1, l1 = ax_fz.get_legend_handles_labels()
-        h2, l2 = ax_fz_twin.get_legend_handles_labels()
-        ax_fz.legend(h1 + h2, l1 + l2, loc="upper right")
-        ax_fz.set_title("Vertical GRF (Fz) vs. Attention Profile Over Time", fontsize=12, fontweight='bold')
-        ax_fz.set_xlim(0, seq_len - 1)
-
-        # 3. Shear GRFs (Fx, Fy)
-        ax_shear = fig.add_subplot(gs[2, :])
-        fx_idx = target_names.index("Fx") if "Fx" in target_names else 0
-        fy_idx = target_names.index("Fy") if "Fy" in target_names else 1
-        
-        if targets.shape[2] > fx_idx:
-            ax_shear.plot(time_steps_raw, targets[s_idx, :, fx_idx], 'g-', label="Ground Truth (Fx)", alpha=0.7)
-            ax_shear.plot(time_steps_raw, preds[s_idx, :, fx_idx], 'g--', label="Predicted (Fx)", alpha=0.9)
-        if targets.shape[2] > fy_idx:
-            ax_shear.plot(time_steps_raw, targets[s_idx, :, fy_idx], 'b-', label="Ground Truth (Fy)", alpha=0.7)
-            ax_shear.plot(time_steps_raw, preds[s_idx, :, fy_idx], 'b--', label="Predicted (Fy)", alpha=0.9)
-            
-        ax_shear.set_ylabel("Shear GRF (Fx, Fy) [N]", fontsize=11, fontweight='bold')
-        ax_shear.grid(True, linestyle=":", alpha=0.6)
-        ax_shear.legend(loc="upper right")
-        ax_shear.set_title("Shear GRFs (Fx, Fy) Prediction", fontsize=12, fontweight='bold')
-        ax_shear.set_xlim(0, seq_len - 1)
-
-        # 4. Plantar Pressure (Heel-Strike check)
-        ax_press = fig.add_subplot(gs[3, :2])
-        press_cols = [col for col in feature_names if col.startswith("P")]
-        if not press_cols:
-            press_cols = [feature_names[i] for i in range(min(8, len(feature_names)))]
-            
-        for col in press_cols[:4]:
-            col_idx = feature_names.index(col)
-            ax_press.plot(time_steps_raw, inputs[s_idx, :, col_idx], label=f"Pressure {col}", alpha=0.7)
-            
-        ax_press_twin = ax_press.twinx()
-        for col in press_cols[4:8]:
-            col_idx = feature_names.index(col)
-            ax_press_twin.plot(time_steps_raw, inputs[s_idx, :, col_idx], ':', label=f"Pressure {col}", alpha=0.7)
-            
-        ax_press.set_ylabel("Forefoot Pressure [V/Scale]", fontsize=11)
-        ax_press_twin.set_ylabel("Heel Pressure [V/Scale]", fontsize=11)
-        ax_press.grid(True, linestyle=":", alpha=0.6)
-        
-        h1, l1 = ax_press.get_legend_handles_labels()
-        h2, l2 = ax_press_twin.get_legend_handles_labels()
-        ax_press.legend(h1 + h2, l1 + l2, loc="upper right")
-        ax_press.set_title("Plantar Pressure Waveforms (Heel-Strike to Toe-Off check)", fontsize=12, fontweight='bold')
-        ax_press.set_xlabel("Time step", fontsize=10)
-        ax_press.set_xlim(0, seq_len - 1)
-        
-        # 5. Layer-wise Attention Profiles
-        ax_layer_attn = fig.add_subplot(gs[3, 2])
-        colors = ["tab:blue", "tab:orange", "tab:green"]
-        for l_idx in range(num_layers):
-            # Compute raw key importance profile
-            raw_prof = np.mean(np.mean(attention_maps[l_idx][s_idx], axis=0), axis=0)
-            ax_layer_attn.plot(
-                time_steps_raw, raw_prof,
-                label=f"Layer {l_idx + 1}",
-                color=colors[l_idx % len(colors)],
-                linewidth=2.0
-            )
-        ax_layer_attn.set_title("Attention Profile per Layer", fontsize=12, fontweight='bold')
-        ax_layer_attn.set_xlabel("Time step", fontsize=10)
-        ax_layer_attn.set_ylabel("Key-wise Attention Mean", fontsize=10)
-        ax_layer_attn.grid(True, linestyle=":", alpha=0.6)
-        ax_layer_attn.legend(loc="upper right")
-        ax_layer_attn.set_xlim(0, seq_len - 1)
+        # 2. 2D Heatmap for Attention Rollout (Row 1)
+        ax_r_summary = fig.add_subplot(gs[1, :])
+        plot_single_heatmap(
+            ax_r_summary, s_rollout, f"Attention Rollout (Head: {args.head_idx})",
+            vmin=0.0, vmax=vmax, boundaries_pct=gait_phases
+        )
         
         title_meta = f"_fold{args.fold}_sample{s_idx}_{sub_name}_{cond_name}"
         plt.suptitle(f"Biomechanical Attention Analysis (Sample Index: {s_idx})", fontsize=16, fontweight='bold', y=0.99)
@@ -803,7 +742,7 @@ def main():
         num_samples = len(agg_inputs)
         num_layers = len(agg_maps)
         
-        # 1. Calculate Aggregated Maps
+        # 1. Calculate and save Layerwise Aggregated Maps, and Aggregate Head-wise Maps
         layer_averages = []
         for l_idx in range(num_layers):
             # Mean across batch and heads
@@ -812,7 +751,7 @@ def main():
                 agg_m = temporal_binning(agg_m, args.downsample_bins)
             layer_averages.append(agg_m)
             
-            # Save aggregated layerwise heatmap
+            # Save aggregated layerwise heatmap individual PNG
             fig_l, ax_l = plt.subplots(figsize=(6, 5))
             plot_single_heatmap(
                 ax_l, agg_m, f"Aggregated Layer {l_idx+1} Mean (N={num_samples})",
@@ -823,6 +762,25 @@ def main():
                 dpi=300, bbox_inches='tight'
             )
             plt.close(fig_l)
+            
+            # Save aggregate head-wise mean heatmaps (layer x head mean aggregate)
+            # shape of agg_maps[l_idx]: (Batch, nhead, SeqLen, SeqLen)
+            nheads = agg_maps[l_idx].shape[1]
+            for h_idx in range(nheads):
+                head_map = np.mean(agg_maps[l_idx][:, h_idx], axis=0) # (SeqLen, SeqLen)
+                if args.downsample_bins:
+                    head_map = temporal_binning(head_map, args.downsample_bins)
+                    
+                fig_h, ax_h = plt.subplots(figsize=(6, 5))
+                plot_single_heatmap(
+                    ax_h, head_map, f"Aggregated Layer {l_idx+1} Head {h_idx} Mean (N={num_samples})",
+                    vmin=0.0, vmax=vmax, boundaries_pct=gait_phases
+                )
+                fig_h.savefig(
+                    os.path.join(output_base, "headwise", f"layer{l_idx+1}_head{h_idx}_mean_aggregate.png"),
+                    dpi=300, bbox_inches='tight'
+                )
+                plt.close(fig_h)
 
         # 2. Aggregated Phase Matrix
         mean_all_layers_agg = np.mean(np.stack([np.mean(np.mean(agg_maps[l], axis=1), axis=0) for l in range(num_layers)]), axis=0)
@@ -847,6 +805,7 @@ def main():
         if args.downsample_bins:
             agg_rollout = temporal_binning(agg_rollout, args.downsample_bins)
             
+        # Save rollout heatmap
         fig_r, ax_r = plt.subplots(figsize=(6, 5))
         plot_single_heatmap(
             ax_r, agg_rollout, f"Aggregated Rollout (N={num_samples}, Head: {args.head_idx})",
@@ -864,12 +823,90 @@ def main():
             dpi=300, bbox_inches='tight'
         )
         plt.close(fig_r)
-
-        # 4. Save Aggregated Summary Figure
-        fig = plt.figure(figsize=(18, 12), constrained_layout=True)
-        gs = gridspec.GridSpec(3, 3, figure=fig, height_ratios=[1.2, 1.0, 1.0])
         
-        # Heatmaps for layers
+        # Save rollout profile aggregate (Key-wise mean rollout profile)
+        transposed_rollout = np.transpose(rollout_batch, (0, 2, 1)) # (Batch, Key, Query)
+        batch_key_profiles = np.mean(transposed_rollout, axis=2) # (Batch, Key)
+        
+        if args.downsample_bins:
+            bin_size = seq_len // args.downsample_bins
+            batch_key_profiles = batch_key_profiles.reshape(num_samples, args.downsample_bins, bin_size).mean(axis=2)
+            
+        mean_prof = np.mean(batch_key_profiles, axis=0)
+        std_prof = np.std(batch_key_profiles, axis=0)
+        gait_cycle_pct = np.linspace(0, 100, len(mean_prof))
+        
+        fig_prof, ax_prof = plt.subplots(figsize=(10, 4))
+        ax_prof.plot(gait_cycle_pct, mean_prof, color="tab:blue", linewidth=2.0, label="Global Mean Rollout Profile")
+        ax_prof.fill_between(
+            gait_cycle_pct,
+            np.maximum(0, mean_prof - std_prof),
+            mean_prof + std_prof,
+            color="tab:blue",
+            alpha=0.2
+        )
+        ax_prof.set_title("Global Attention Rollout Profile", fontsize=12, fontweight='bold')
+        ax_prof.set_xlabel("Key (% Gait Cycle)", fontsize=10)
+        ax_prof.set_ylabel("Rollout Weight", fontsize=10)
+        ax_prof.grid(True, linestyle=":", alpha=0.6)
+        ax_prof.legend()
+        ax_prof.set_xlim(0, 100)
+        ax_prof.set_xticks([0, 25, 50, 75, 100])
+        fig_prof.savefig(
+            os.path.join(output_base, "rollout", f"rollout_profile_aggregate{filter_suffix}.png"),
+            dpi=300, bbox_inches='tight'
+        )
+        plt.close(fig_prof)
+
+        # Save Attention Profile per Layer (Aggregate mode standalone)
+        fig_layers, ax_layers = plt.subplots(figsize=(10, 4))
+        colors = ["tab:blue", "tab:orange", "tab:green"]
+        for l_idx in range(num_layers):
+            h_mean = np.mean(agg_maps[l_idx], axis=1) # (Batch, SeqLen, SeqLen)
+            profiles = np.mean(h_mean, axis=1) # (Batch, SeqLen)
+            
+            if args.downsample_bins:
+                bin_size = seq_len // args.downsample_bins
+                profiles = profiles.reshape(num_samples, args.downsample_bins, bin_size).mean(axis=2)
+                
+            mean_prof_l = np.mean(profiles, axis=0)
+            std_prof_l = np.std(profiles, axis=0)
+            gait_cycle_pct_l = np.linspace(0, 100, len(mean_prof_l))
+            
+            ax_layers.plot(
+                gait_cycle_pct_l, mean_prof_l,
+                label=f"Layer {l_idx + 1}",
+                color=colors[l_idx % len(colors)],
+                linewidth=2.0
+            )
+            ax_layers.fill_between(
+                gait_cycle_pct_l,
+                np.maximum(0, mean_prof_l - std_prof_l),
+                mean_prof_l + std_prof_l,
+                color=colors[l_idx % len(colors)],
+                alpha=0.1
+            )
+            
+        ax_layers.set_title("Aggregated Attention Profile per Layer (Mean ± Std)", fontsize=12, fontweight='bold')
+        ax_layers.set_xlabel("Key (% Gait Cycle)", fontsize=10)
+        ax_layers.set_ylabel("Key-wise Attention Mean", fontsize=10)
+        ax_layers.grid(True, linestyle=":", alpha=0.6)
+        ax_layers.legend(loc="upper right")
+        ax_layers.set_xlim(0, 100)
+        ax_layers.set_xticks([0, 25, 50, 75, 100])
+        fig_layers.savefig(
+            os.path.join(output_base, "rollout", "layer_attention_profile_aggregate.png"),
+            dpi=300, bbox_inches='tight'
+        )
+        plt.close(fig_layers)
+
+        # ------------------------------------------
+        # 4. Save Aggregated Summary Figure (2x3 Grid Heatmaps Only)
+        # ------------------------------------------
+        fig = plt.figure(figsize=(18, 10), constrained_layout=True)
+        gs = gridspec.GridSpec(2, 3, figure=fig, height_ratios=[1.0, 1.0])
+        
+        # Heatmaps for layers (Row 0)
         for l_idx in range(num_layers):
             ax = fig.add_subplot(gs[0, l_idx])
             plot_single_heatmap(
@@ -877,73 +914,12 @@ def main():
                 vmin=0.0, vmax=vmax, boundaries_pct=gait_phases
             )
             
-        # Average Fz Waveform with Overlay
-        ax_fz = fig.add_subplot(gs[1, :])
-        fz_idx = target_names.index("Fz") if "Fz" in target_names else min(2, targets.shape[2] - 1)
-        fz_targets = agg_targets[:, :, fz_idx]
-        fz_preds = agg_preds[:, :, fz_idx]
-        
-        mean_fz_target = np.mean(fz_targets, axis=0)
-        std_fz_target = np.std(fz_targets, axis=0)
-        mean_fz_pred = np.mean(fz_preds, axis=0)
-        std_fz_pred = np.std(fz_preds, axis=0)
-        
-        time_steps_raw = np.arange(seq_len)
-        
-        ax_fz.plot(time_steps_raw, mean_fz_target, 'k-', label="Average Ground Truth Fz", linewidth=2.5)
-        ax_fz.fill_between(time_steps_raw, mean_fz_target - std_fz_target, mean_fz_target + std_fz_target, color='black', alpha=0.15)
-        ax_fz.plot(time_steps_raw, mean_fz_pred, 'r--', label="Average Predicted Fz", linewidth=2.0)
-        ax_fz.fill_between(time_steps_raw, mean_fz_pred - std_fz_pred, mean_fz_pred + std_fz_pred, color='red', alpha=0.1)
-        
-        ax_fz.set_ylabel("Vertical GRF (Fz) [N]", color="k", fontsize=11, fontweight='bold')
-        ax_fz.tick_params(axis='y', labelcolor="k")
-        ax_fz.grid(True, linestyle=":", alpha=0.6)
-        
-        # Overlay mean rollout key-wise profile
-        raw_rollout_key = np.mean(np.mean(rollout_batch, axis=0), axis=0) # Mean over Query dimension
-        ax_fz_twin = ax_fz.twinx()
-        ax_fz_twin.plot(time_steps_raw, raw_rollout_key, color="tab:blue", linewidth=2.0, label="Global Mean Rollout Profile")
-        ax_fz_twin.set_ylabel("Rollout Weight", color="tab:blue", fontsize=11, fontweight='bold')
-        ax_fz_twin.tick_params(axis='y', labelcolor="tab:blue")
-        
-        h1, l1 = ax_fz.get_legend_handles_labels()
-        h2, l2 = ax_fz_twin.get_legend_handles_labels()
-        ax_fz.legend(h1 + h2, l1 + l2, loc="upper right")
-        ax_fz.set_title(f"Aggregated Fz Waveforms vs. Global Rollout Profile (N={num_samples})", fontsize=12, fontweight='bold')
-        ax_fz.set_xlim(0, seq_len - 1)
-
-        # Layer-wise Aggregated Profiles
-        ax_layers = fig.add_subplot(gs[2, :])
-        colors = ["tab:blue", "tab:orange", "tab:green"]
-        for l_idx in range(num_layers):
-            # Compute mean key importance profiles across batch
-            # Shape of agg_maps[l_idx]: (Batch, nhead, SeqLen, SeqLen) -> mean over heads -> mean over Query axis -> (Batch, SeqLen)
-            h_mean = np.mean(agg_maps[l_idx], axis=1) # (Batch, SeqLen, SeqLen)
-            profiles = np.mean(h_mean, axis=1) # (Batch, SeqLen)
-            
-            mean_prof = np.mean(profiles, axis=0)
-            std_prof = np.std(profiles, axis=0)
-            
-            ax_layers.plot(
-                time_steps_raw, mean_prof,
-                label=f"Layer {l_idx + 1}",
-                color=colors[l_idx % len(colors)],
-                linewidth=2.0
-            )
-            ax_layers.fill_between(
-                time_steps_raw,
-                np.maximum(0, mean_prof - std_prof),
-                mean_prof + std_prof,
-                color=colors[l_idx % len(colors)],
-                alpha=0.1
-            )
-            
-        ax_layers.set_title("Aggregated Attention Profile per Layer (Mean ± Std)", fontsize=12, fontweight='bold')
-        ax_layers.set_xlabel("Time step", fontsize=10)
-        ax_layers.set_ylabel("Key-wise Attention Mean", fontsize=10)
-        ax_layers.grid(True, linestyle=":", alpha=0.6)
-        ax_layers.legend(loc="upper right")
-        ax_layers.set_xlim(0, seq_len - 1)
+        # Aggregated Rollout (Row 1)
+        ax_r_summary = fig.add_subplot(gs[1, :])
+        plot_single_heatmap(
+            ax_r_summary, agg_rollout, f"Aggregated Rollout (Head: {args.head_idx})",
+            vmin=0.0, vmax=vmax, boundaries_pct=gait_phases
+        )
         
         title_str = f"Aggregated Biomechanical Attention Analysis (N={num_samples} Strides)"
         if filter_desc:
