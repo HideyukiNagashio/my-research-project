@@ -302,7 +302,7 @@ def plot_single_sample(sample_idx, inputs, preds, targets, attention_maps, featu
     for layer_idx in range(num_layers):
         ax = fig.add_subplot(gs[0, layer_idx])
         sns.heatmap(
-            layer_maps[layer_idx],
+            layer_maps[layer_idx].T,
             cmap="viridis",
             ax=ax,
             cbar=True,
@@ -311,8 +311,7 @@ def plot_single_sample(sample_idx, inputs, preds, targets, attention_maps, featu
             yticklabels=20
         )
         ax.set_title(f"Layer {layer_idx + 1} Attention Map (Head: {head_idx})", fontsize=12, fontweight='bold')
-        ax.set_xlabel("Key (Attended Timestep)", fontsize=10)
-        ax.set_ylabel("Query (Source Timestep)", fontsize=10)
+        ax.set_ylabel("Key (Attended Timestep)", fontsize=10)
         ax.invert_yaxis()
 
     # --- Row 2: vertical GRF (Fz) ---
@@ -453,7 +452,7 @@ def plot_aggregate_attention(inputs, preds, targets, attention_maps, target_name
     for layer_idx in range(num_layers):
         ax = fig.add_subplot(gs[0, layer_idx])
         sns.heatmap(
-            aggregated_maps[layer_idx],
+            aggregated_maps[layer_idx].T,
             cmap="viridis",
             ax=ax,
             cbar=True,
@@ -462,8 +461,8 @@ def plot_aggregate_attention(inputs, preds, targets, attention_maps, target_name
             yticklabels=20
         )
         ax.set_title(f"Aggregated Layer {layer_idx + 1} Attention Map (Head: {head_idx})", fontsize=11, fontweight='bold')
-        ax.set_xlabel("Key (Attended Timestep)", fontsize=9)
-        ax.set_ylabel("Query (Source Timestep)", fontsize=9)
+        ax.set_xlabel("Query (Source Timestep)", fontsize=9)
+        ax.set_ylabel("Key (Attended Timestep)", fontsize=9)
         ax.invert_yaxis()
 
     # --- Row 2: Average Fz Profile with Attention Overlay ---
