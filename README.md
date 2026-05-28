@@ -62,7 +62,8 @@ project_root/
 ├── scripts/        # 各種処理を実行するためのコマンドラインスクリプト群
 │   ├── preprocess.py      # 旧バージョン：全体の前処理コード（移行済）
 │   ├── run_manual_cv.py   # 6-fold CVデータセットの構築スクリプト
-│   └── train_cv.py        # モデルの学習・評価・結果保存を自動実行するスクリプト
+│   ├── train_cv.py        # モデルの学習・評価・結果保存を自動実行するスクリプト
+│   └── visualize_attention.py  # 自己注意の抽出と可視化スクリプト（XAI分析ツール）
 │
 ├── outputs/        # 実験結果の出力先
 │   └── experiments/   # 各学習実験のログ、モデルパラメータ、評価結果が保存される
@@ -318,6 +319,48 @@ outputs/experiments/cnn_grf_single_20260416_160500/
 - **Optuna等による自動調整化**: `train_cv.py` におけるハイパーパラメータの引数を Optuna トライアル変数に連結することで、探索範囲を容易に自動化できます。
 - **推論および可視化スクリプトの開発**: 保存済みの `best_model.pth` をロードし、外部実地データに対してリアルタイムに近い速度で推論および物理的可視化（アニメーションGIF化等）を行うツールを開発予定です。
 - **新しい入力特徴量の拡張**: モーションキャプチャ等から追加した「時間・距離空間的パラメータ」等に対しても、`feature_selector.py` 内に抽出論理を追加することで対応可能です。
+
+---
+## 14. 自己注意の可視化と解釈 (Explainability Framework)
+
+モデルのブラックボックス性を解消し、歩行バイオメカニクス的観点から予測結果の妥当性を検証するため、`TimeSeriesTransformer` の自己注意（Self-Attention）を抽出・分析するツール `scripts/visualize_attention.py` を実装しています。
+
+### 主な解析機能
+
+1. **自己注意ヒートマップ (2D)**:
+   - 各レイヤー、各ヘッドにおけるアテンション分布を可視化します。
+   - 軸設定は学術的慣例に従い、**「横軸 ＝ Query（現在の歩行周期 %）」、「縦軸 ＝ Key（参照先の歩行周期 %）」** に統一されています。
+2. **Attention Rollout**:
+   - 残差接続（Residual Connection）を考慮したうえで全層のアテンションを統合し、最終予測が入力ステップのどこに依存しているかを計算・可視化します。
+3. **1D Attention Profile**:
+   - 各タイムステップが「他のすべてのタイムステップからどれだけ注目されたか」の強さをラインプロットとして描画します（`rollout/` に保存）。
+4. **Phase-to-Phase Attention Matrix ($7 \times 7$)**:
+   - 200×200のアテンションマップを、歩行周期における7つの標準フェーズ（LR, MSt, TSt, PSw, ISw, MSw, TSw）に圧縮し、フェーズ間の平均的な情報の結びつきをマトリクスとして定量化します（`phase_matrix/` に保存）。
+
+### 実行例
+
+```bash
+# 50ビンに時間軸圧縮し、共通のカラースケール（vmax）を用いて、sample 0のアテンションを個別保存
+PYTHONPATH="$(pwd)" ./env/bin/python scripts/visualize_attention.py \
+    --exp_dir outputs/experiments/transformer_grf_single_weighted_transformer_20260421_055208 \
+    --fold 1 \
+    --sample_idx 0 \
+    --downsample_bins 50 \
+    --shared_cmap \
+    --no_show
+```
+
+### 結果の保存先
+
+学習済みモデルディレクトリ内の `attention_plots/` 以下に各画像が 300 DPI で保存されます。
+
+```text
+attention_plots/
+├── layerwise/      # 各層平均アテンションマップ (2D)
+├── headwise/       # 各層・各ヘッドのアテンションマップ (2D)
+├── rollout/        # Attention Rollout マップ (2D) およびプロファイル (1D)
+└── phase_matrix/   # 7x7 歩行フェーズ間関係マトリクス (2D)
+```
 
 ---
 *この体系化された統合基盤により、再現性の確保やデータリークの構造的な回避が実現されており、開発者および共同研究者はより上位の「比較検証」と「研究論文執筆」等に注力することが可能です。*
