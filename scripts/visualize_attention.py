@@ -524,7 +524,7 @@ def main():
     vmax = global_vmax if args.shared_cmap else None
     
     # 6. Initialize output subdirectories
-    output_base = args.output_dir if args.output_dir else os.path.join(args.exp_dir, "attention_plots")
+    output_base = args.output_dir if args.output_dir else os.path.join(args.exp_dir, "attention_plots", f"fold{args.fold}")
     subdirs = ["layerwise", "headwise", "rollout", "phase_matrix"]
     for sd in subdirs:
         os.makedirs(os.path.join(output_base, sd), exist_ok=True)
