@@ -335,7 +335,7 @@ outputs/experiments/cnn_grf_single_20260416_160500/
 3. **1D Attention Profile**:
    - 各タイムステップが「他のすべてのタイムステップからどれだけ注目されたか」の強さをラインプロットとして描画します（`rollout/` に保存）。
 4. **Phase-to-Phase Attention Matrix ($7 \times 7$)**:
-   - 200×200のアテンションマップを、歩行周期における7つの標準フェーズ（LR, MSt, TSt, PSw, ISw, MSw, TSw）に圧縮し、フェーズ間の平均的な情報の結びつきをマトリクスとして定量化します（`phase_matrix/` に保存）。
+   - 200×200のアテンションロールアウトマップ（Attention Rollout）を、歩行周期における7つの標準フェーズ（LR, MSt, TSt, PSw, ISw, MSw, TSw）に圧縮し、フェーズ間の最終的な累積情報依存関係をマトリクスとして定量化します（`phase_matrix/` に保存）。
 
 ### 実行例
 

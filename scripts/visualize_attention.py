@@ -615,33 +615,14 @@ def main():
                 plt.close(fig_h)
 
         # ------------------------------------------
-        # B. Phase-to-Phase Matrix Calculation
-        # ------------------------------------------
-        # Calculate Phase Matrix based on the mean across layers
-        mean_all_layers = np.mean(np.stack([np.mean(attention_maps[l][s_idx], axis=0) for l in range(num_layers)]), axis=0)
-        p_matrix = calculate_phase_matrix(mean_all_layers, seq_len, boundaries)
-        
-        # Save Phase Matrix heatmap
-        fig_pm, ax_pm = plt.subplots(figsize=(7, 6))
-        sns.heatmap(p_matrix.T, cmap="viridis", annot=True, fmt=".4f", ax=ax_pm, square=True)
-        ax_pm.set_title(f"Phase-to-Phase Attention Matrix (Sample {s_idx})", fontsize=12, fontweight='bold')
-        ax_pm.set_xlabel("Query (Current Phase)", fontsize=10)
-        ax_pm.set_ylabel("Key (Attended Phase)", fontsize=10)
-        ax_pm.invert_yaxis()
-        fig_pm.savefig(
-            os.path.join(output_base, "phase_matrix", f"phase_matrix_sample{s_idx}.png"),
-            dpi=300, bbox_inches='tight'
-        )
-        plt.close(fig_pm)
-
-        # ------------------------------------------
-        # C. Attention Rollout Calculation
+        # B. Attention Rollout Calculation
         # ------------------------------------------
         rollout_batch = calculate_attention_rollout(attention_maps, args.head_idx) # (Batch, SeqLen, SeqLen)
-        s_rollout = rollout_batch[s_idx] # (SeqLen, SeqLen)
+        s_rollout_raw = rollout_batch[s_idx] # Keep raw rollout of shape (SeqLen, SeqLen)
         
+        s_rollout = s_rollout_raw
         if args.downsample_bins:
-            s_rollout = temporal_binning(s_rollout, args.downsample_bins)
+            s_rollout = temporal_binning(s_rollout_raw, args.downsample_bins)
             
         # Save Rollout Heatmap
         fig_r, ax_r = plt.subplots(figsize=(6, 5))
@@ -658,6 +639,25 @@ def main():
         # Save Rollout Profile (Key-wise Profile only)
         transposed_rollout = s_rollout.T # (Key, Query)
         key_profile = np.mean(transposed_rollout, axis=1) # Mean over Query
+        gait_cycle_pct = np.linspace(0, 100, len(key_profile))
+
+        # ------------------------------------------
+        # C. Phase-to-Phase Matrix Calculation (Rollout-based)
+        # ------------------------------------------
+        p_matrix = calculate_phase_matrix(s_rollout_raw, seq_len, boundaries)
+        
+        # Save Phase Matrix heatmap
+        fig_pm, ax_pm = plt.subplots(figsize=(7, 6))
+        sns.heatmap(p_matrix.T, cmap="viridis", annot=True, fmt=".4f", ax=ax_pm, square=True)
+        ax_pm.set_title(f"Phase-to-Phase Attention Matrix (Sample {s_idx})", fontsize=12, fontweight='bold')
+        ax_pm.set_xlabel("Query (Current Phase)", fontsize=10)
+        ax_pm.set_ylabel("Key (Attended Phase)", fontsize=10)
+        ax_pm.invert_yaxis()
+        fig_pm.savefig(
+            os.path.join(output_base, "phase_matrix", f"phase_matrix_sample{s_idx}.png"),
+            dpi=300, bbox_inches='tight'
+        )
+        plt.close(fig_pm)
         gait_cycle_pct = np.linspace(0, 100, len(key_profile))
         
         fig_prof, ax_prof = plt.subplots(figsize=(10, 4))
@@ -754,28 +754,13 @@ def main():
                 )
                 plt.close(fig_h)
 
-        # 2. Aggregated Phase Matrix
-        mean_all_layers_agg = np.mean(np.stack([np.mean(np.mean(agg_maps[l], axis=1), axis=0) for l in range(num_layers)]), axis=0)
-        p_matrix_agg = calculate_phase_matrix(mean_all_layers_agg, seq_len, boundaries)
-        
-        fig_pm, ax_pm = plt.subplots(figsize=(7, 6))
-        sns.heatmap(p_matrix_agg.T, cmap="viridis", annot=True, fmt=".4f", ax=ax_pm, square=True)
-        ax_pm.set_title(f"Aggregated Phase Matrix (N={num_samples})", fontsize=12, fontweight='bold')
-        ax_pm.set_xlabel("Query (Current Phase)", fontsize=10)
-        ax_pm.set_ylabel("Key (Attended Phase)", fontsize=10)
-        ax_pm.invert_yaxis()
-        fig_pm.savefig(
-            os.path.join(output_base, "phase_matrix", f"phase_matrix_aggregate.png"),
-            dpi=300, bbox_inches='tight'
-        )
-        plt.close(fig_pm)
-
-        # 3. Aggregated Attention Rollout
+        # 2. Aggregated Attention Rollout
         rollout_batch = calculate_attention_rollout(agg_maps, args.head_idx) # (Batch, SeqLen, SeqLen)
-        agg_rollout = np.mean(rollout_batch, axis=0) # (SeqLen, SeqLen)
+        agg_rollout_raw = np.mean(rollout_batch, axis=0) # Raw resolution (SeqLen, SeqLen)
         
+        agg_rollout = agg_rollout_raw
         if args.downsample_bins:
-            agg_rollout = temporal_binning(agg_rollout, args.downsample_bins)
+            agg_rollout = temporal_binning(agg_rollout_raw, args.downsample_bins)
             
         # Save rollout heatmap
         fig_r, ax_r = plt.subplots(figsize=(6, 5))
@@ -795,6 +780,22 @@ def main():
             dpi=300, bbox_inches='tight'
         )
         plt.close(fig_r)
+
+        # 3. Aggregated Phase Matrix (Rollout-based)
+        p_matrix_agg = calculate_phase_matrix(agg_rollout_raw, seq_len, boundaries)
+        
+        fig_pm, ax_pm = plt.subplots(figsize=(7, 6))
+        sns.heatmap(p_matrix_agg.T, cmap="viridis", annot=True, fmt=".4f", ax=ax_pm, square=True)
+        ax_pm.set_title(f"Aggregated Phase Matrix (N={num_samples})", fontsize=12, fontweight='bold')
+        ax_pm.set_xlabel("Query (Current Phase)", fontsize=10)
+        ax_pm.set_ylabel("Key (Attended Phase)", fontsize=10)
+        ax_pm.invert_yaxis()
+        fig_pm.savefig(
+            os.path.join(output_base, "phase_matrix", f"phase_matrix_aggregate.png"),
+            dpi=300, bbox_inches='tight'
+        )
+        plt.close(fig_pm)
+
         
         # Save rollout profile aggregate (Key-wise mean rollout profile)
         transposed_rollout = np.transpose(rollout_batch, (0, 2, 1)) # (Batch, Key, Query)
