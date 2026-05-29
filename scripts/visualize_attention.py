@@ -333,51 +333,6 @@ def calculate_phase_matrix(A: np.ndarray, seq_len: int, boundaries: dict) -> np.
     return matrix
 
 
-def calculate_phase_matrix_normalized_sum(A: np.ndarray, seq_len: int, boundaries: dict) -> np.ndarray:
-    """
-    Computes a compressed (N_phase, N_phase) attention mass distribution matrix
-    where each column (Query phase) sums to 1.
-    
-    Args:
-        A: Attention map of shape (SeqLen, SeqLen) (Query, Key)
-        seq_len: sequence length (e.g. 200)
-        boundaries: dict containing phase_name -> (start_step, end_step)
-        
-    Returns:
-        matrix: shape (N_phase, N_phase) where row=Key phase, col=Query phase.
-                satisfying matrix[:, j].sum() == 1 for all j.
-    """
-    phase_names = list(boundaries.keys())
-    num_phases = len(phase_names)
-    matrix = np.zeros((num_phases, num_phases))
-    
-    for j, q_name in enumerate(phase_names):
-        q_start, q_end = boundaries[q_name]
-        q_indices = np.arange(int(round(q_start)), int(round(q_end)))
-        q_indices = q_indices[(q_indices >= 0) & (q_indices < seq_len)]
-        
-        if len(q_indices) == 0:
-            matrix[:, j] = 1.0 / num_phases
-            continue
-            
-        sums = np.zeros(num_phases)
-        for i, k_name in enumerate(phase_names):
-            k_start, k_end = boundaries[k_name]
-            k_indices = np.arange(int(round(k_start)), int(round(k_end)))
-            k_indices = k_indices[(k_indices >= 0) & (k_indices < seq_len)]
-            
-            if len(k_indices) > 0:
-                sub_matrix = A[np.ix_(q_indices, k_indices)]
-                sums[i] = np.sum(sub_matrix)
-                
-        total_mass = np.sum(sums)
-        if total_mass > 1e-9:
-            matrix[:, j] = sums / total_mass
-        else:
-            matrix[:, j] = 1.0 / num_phases
-            
-    return matrix
-
 
 def compute_global_vmax(attention_maps: list) -> float:
     """
@@ -692,32 +647,30 @@ def main():
         # ------------------------------------------
         p_matrix = calculate_phase_matrix(s_rollout_raw, seq_len, boundaries)
         
-        # Save Phase Matrix heatmap
+        # Save Phase Matrix heatmap (using phase names as labels)
         fig_pm, ax_pm = plt.subplots(figsize=(7, 6))
-        sns.heatmap(p_matrix.T, cmap="viridis", annot=True, fmt=".4f", ax=ax_pm, square=True)
+        phase_names = list(boundaries.keys())
+        sns.heatmap(
+            p_matrix, 
+            cmap="viridis", 
+            annot=True, 
+            fmt=".4f", 
+            ax=ax_pm, 
+            square=True,
+            xticklabels=phase_names,
+            yticklabels=phase_names
+        )
         ax_pm.set_title(f"Phase-to-Phase Attention Matrix (Sample {s_idx})", fontsize=12, fontweight='bold')
         ax_pm.set_xlabel("Query (Current Phase)", fontsize=10)
         ax_pm.set_ylabel("Key (Attended Phase)", fontsize=10)
+        ax_pm.set_xticklabels(phase_names, rotation=45)
+        ax_pm.set_yticklabels(phase_names, rotation=0)
         ax_pm.invert_yaxis()
         fig_pm.savefig(
             os.path.join(output_base, "phase_matrix", f"phase_matrix_sample{s_idx}.png"),
             dpi=300, bbox_inches='tight'
         )
         plt.close(fig_pm)
-
-        # Calculate and Save Normalized Phase Matrix (Attention Mass Preserving)
-        p_matrix_norm = calculate_phase_matrix_normalized_sum(s_rollout_raw, seq_len, boundaries)
-        fig_pmn, ax_pmn = plt.subplots(figsize=(7, 6))
-        sns.heatmap(p_matrix_norm.T, cmap="viridis", annot=True, fmt=".4f", ax=ax_pmn, square=True)
-        ax_pmn.set_title(f"Phase-wise Normalized Attention Mass (Sample {s_idx})", fontsize=12, fontweight='bold')
-        ax_pmn.set_xlabel("Query (Current Phase)", fontsize=10)
-        ax_pmn.set_ylabel("Key (Attended Phase)", fontsize=10)
-        ax_pmn.invert_yaxis()
-        fig_pmn.savefig(
-            os.path.join(output_base, "phase_matrix", f"phase_matrix_normalized_sample{s_idx}.png"),
-            dpi=300, bbox_inches='tight'
-        )
-        plt.close(fig_pmn)
         gait_cycle_pct = np.linspace(0, 100, len(key_profile))
         
         fig_prof, ax_prof = plt.subplots(figsize=(10, 4))
@@ -845,30 +798,28 @@ def main():
         p_matrix_agg = calculate_phase_matrix(agg_rollout_raw, seq_len, boundaries)
         
         fig_pm, ax_pm = plt.subplots(figsize=(7, 6))
-        sns.heatmap(p_matrix_agg.T, cmap="viridis", annot=True, fmt=".4f", ax=ax_pm, square=True)
+        phase_names = list(boundaries.keys())
+        sns.heatmap(
+            p_matrix_agg, 
+            cmap="viridis", 
+            annot=True, 
+            fmt=".4f", 
+            ax=ax_pm, 
+            square=True,
+            xticklabels=phase_names,
+            yticklabels=phase_names
+        )
         ax_pm.set_title(f"Aggregated Phase Matrix (N={num_samples})", fontsize=12, fontweight='bold')
         ax_pm.set_xlabel("Query (Current Phase)", fontsize=10)
         ax_pm.set_ylabel("Key (Attended Phase)", fontsize=10)
+        ax_pm.set_xticklabels(phase_names, rotation=45)
+        ax_pm.set_yticklabels(phase_names, rotation=0)
         ax_pm.invert_yaxis()
         fig_pm.savefig(
             os.path.join(output_base, "phase_matrix", f"phase_matrix_aggregate.png"),
             dpi=300, bbox_inches='tight'
         )
         plt.close(fig_pm)
-
-        # Calculate and Save Aggregated Normalized Phase Matrix (Attention Mass Preserving)
-        p_matrix_agg_norm = calculate_phase_matrix_normalized_sum(agg_rollout_raw, seq_len, boundaries)
-        fig_pmn, ax_pmn = plt.subplots(figsize=(7, 6))
-        sns.heatmap(p_matrix_agg_norm.T, cmap="viridis", annot=True, fmt=".4f", ax=ax_pmn, square=True)
-        ax_pmn.set_title(f"Aggregated Phase-wise Normalized Attention Mass (N={num_samples})", fontsize=12, fontweight='bold')
-        ax_pmn.set_xlabel("Query (Current Phase)", fontsize=10)
-        ax_pmn.set_ylabel("Key (Attended Phase)", fontsize=10)
-        ax_pmn.invert_yaxis()
-        fig_pmn.savefig(
-            os.path.join(output_base, "phase_matrix", f"phase_matrix_normalized_aggregate.png"),
-            dpi=300, bbox_inches='tight'
-        )
-        plt.close(fig_pmn)
 
         
         # Save rollout profile aggregate (Key-wise mean rollout profile)
