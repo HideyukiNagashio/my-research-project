@@ -133,14 +133,41 @@ def main():
         
         # Loss関数
         if args.use_weighted_loss:
-            # TODO: target_typeに応じた適切な重みリストを設定するロジックが必要。
-            # 今回は簡易的に、全て1.0とした上で特定の変数に重みを付けるならここを編集。
-            weights = [1.0] * output_dim
-            # 例: grf_only の場合は Fx, Fy, Fz なので [10.0, 10.0, 1.0] など
-            if args.target_type == 'grf_only':
-                weights = [10.0, 10.0, 1.0]
-            elif args.target_type == 'all':
-                weights = [1.0] * 9 + [10.0, 10.0, 1.0] # 角度は1.0, GRFは重みを大きく
+            if args.weight_type == 'variance':
+                # 分散の逆数による重み付け
+                y_flat = train_dataset.y.view(-1, output_dim)
+                variances = torch.var(y_flat, dim=0)
+                variances = torch.clamp(variances, min=1e-8)
+                weights = (1.0 / variances).tolist()
+            elif args.weight_type == 'std':
+                # 標準偏差の逆数による重み付け
+                y_flat = train_dataset.y.view(-1, output_dim)
+                stds = torch.std(y_flat, dim=0)
+                stds = torch.clamp(stds, min=1e-8)
+                weights = (1.0 / stds).tolist()
+            else:  # 'fixed'
+                weights = [1.0] * output_dim
+                if args.target_type == 'grf_only':
+                    weights = [10.0, 10.0, 1.0]
+                elif args.target_type == 'all':
+                    weights = [1.0] * 9 + [10.0, 10.0, 1.0]
+            
+            print(f"Applying Weighted Loss (weight_type={args.weight_type}):")
+            print(f"  Weights: {['{:.4f}'.format(w) for w in weights]}")
+            
+            # 後で確認できるように重みパラメータをJSONとして保存
+            try:
+                weights_save_path = os.path.join(exp_dir, f'loss_weights_fold{fold}.json')
+                with open(weights_save_path, 'w') as f:
+                    json.dump({
+                        'fold': fold,
+                        'weight_type': args.weight_type,
+                        'target_type': args.target_type,
+                        'weights': weights
+                    }, f, indent=4)
+                print(f"  Saved weights config to {weights_save_path}")
+            except Exception as e:
+                print(f"  Warning: could not save weights config: {e}")
                 
             criterion = WeightedMSELoss(weights, device)
         else:

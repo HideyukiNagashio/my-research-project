@@ -39,6 +39,9 @@ def get_args_parser():
     
     # --- Loss Settings ---
     parser.add_argument('--use_weighted_loss', action='store_true', help='Use Weighted MSE Loss')
+    parser.add_argument('--weight_type', type=str, default='fixed',
+                        choices=['fixed', 'variance', 'std'],
+                        help='Weighting strategy for loss function')
     # Fx, Fy, Fz weights setup; assuming target='all' order or target='grf_only' order
     # Note: Target specific weight shapes must be configured in run script based on target_type
     
