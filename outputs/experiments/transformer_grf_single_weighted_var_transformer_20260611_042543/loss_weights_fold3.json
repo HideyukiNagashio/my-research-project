@@ -1,0 +1,10 @@
+{
+    "fold": 3,
+    "weight_type": "variance",
+    "target_type": "grf_only",
+    "weights": [
+        665.8807983398438,
+        116.33891296386719,
+        4.3695292472839355
+    ]
+}
