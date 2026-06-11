@@ -5,13 +5,15 @@ import numpy as np
 from src.training.metrics import calculate_metrics
 
 class Trainer:
-    def __init__(self, model, criterion, optimizer, scheduler, device, patience=15):
+    def __init__(self, model, criterion, optimizer, scheduler, device, patience=15, y_mean=None, y_std=None):
         self.model = model
         self.criterion = criterion
         self.optimizer = optimizer
         self.scheduler = scheduler
         self.device = device
         self.patience = patience
+        self.y_mean = y_mean
+        self.y_std = y_std
 
     def train(self, num_epochs, train_loader, val_loader, fold_idx=None):
         """
@@ -78,7 +80,15 @@ class Trainer:
             # Metrics computation (Optional per epoch, mainly for monitoring)
             all_preds_np = np.concatenate(all_preds, axis=0)
             all_targets_np = np.concatenate(all_targets, axis=0)
-            val_metrics = calculate_metrics(all_targets_np, all_preds_np)
+            
+            if self.y_mean is not None and self.y_std is not None:
+                eval_preds = all_preds_np * self.y_std + self.y_mean
+                eval_targets = all_targets_np * self.y_std + self.y_mean
+            else:
+                eval_preds = all_preds_np
+                eval_targets = all_targets_np
+                
+            val_metrics = calculate_metrics(eval_targets, eval_preds)
             
             history['val_rmse'].append(val_metrics['rmse'])
             history['val_r2'].append(val_metrics['r2'])
@@ -134,7 +144,15 @@ class Trainer:
         
         all_preds_np = np.concatenate(all_preds, axis=0)
         all_targets_np = np.concatenate(all_targets, axis=0)
-        metrics = calculate_metrics(all_targets_np, all_preds_np)
         
+        if self.y_mean is not None and self.y_std is not None:
+            eval_preds = all_preds_np * self.y_std + self.y_mean
+            eval_targets = all_targets_np * self.y_std + self.y_mean
+        else:
+            eval_preds = all_preds_np
+            eval_targets = all_targets_np
+            
+        metrics = calculate_metrics(eval_targets, eval_preds)
         metrics['loss'] = test_loss
-        return metrics, all_preds_np, all_targets_np
+        
+        return metrics, eval_preds, eval_targets

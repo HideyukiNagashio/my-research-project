@@ -111,6 +111,36 @@ def main():
         val_dataset = GaitDataset(os.path.join(fold_dir, 'val.pkl'), args.input_type, args.target_type)
         test_dataset = GaitDataset(os.path.join(fold_dir, 'test.pkl'), args.input_type, args.target_type)
         
+        y_mean_np = None
+        y_std_np = None
+        if args.standardize_y:
+            y_flat = train_dataset.y.view(-1, output_dim)
+            y_mean = torch.mean(y_flat, dim=0)
+            y_std = torch.std(y_flat, dim=0)
+            y_std = torch.clamp(y_std, min=1e-8)
+            
+            train_dataset.y = (train_dataset.y - y_mean) / y_std
+            val_dataset.y = (val_dataset.y - y_mean) / y_std
+            test_dataset.y = (test_dataset.y - y_mean) / y_std
+            
+            y_mean_np = y_mean.cpu().numpy()
+            y_std_np = y_std.cpu().numpy()
+            
+            try:
+                stats_save_path = os.path.join(exp_dir, f'y_standardization_stats_fold{fold}.json')
+                with open(stats_save_path, 'w') as f:
+                    json.dump({
+                        'fold': fold,
+                        'mean': y_mean_np.tolist(),
+                        'std': y_std_np.tolist()
+                    }, f, indent=4)
+                print(f"Applying Target Standardization (Z-score):")
+                print(f"  Means: {['{:.4f}'.format(m) for m in y_mean_np.tolist()]}")
+                print(f"  Stds:  {['{:.4f}'.format(s) for s in y_std_np.tolist()]}")
+                print(f"  Saved standardization stats to {stats_save_path}")
+            except Exception as e:
+                print(f"  Warning: could not save standardization stats: {e}")
+                
         train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
         val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
         test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
@@ -179,7 +209,10 @@ def main():
         )
         
         # トレーナーの初期化と学習実行
-        trainer = Trainer(model, criterion, optimizer, scheduler, device, patience=args.patience)
+        trainer = Trainer(
+            model, criterion, optimizer, scheduler, device, 
+            patience=args.patience, y_mean=y_mean_np, y_std=y_std_np
+        )
         best_wts, history = trainer.train(args.epochs, train_loader, val_loader, fold_idx=fold)
         
         # Best model の保存とロード

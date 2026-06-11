@@ -42,6 +42,8 @@ def get_args_parser():
     parser.add_argument('--weight_type', type=str, default='fixed',
                         choices=['fixed', 'variance', 'std'],
                         help='Weighting strategy for loss function')
+    parser.add_argument('--standardize_y', action='store_true',
+                        help='Standardize target variables (Z-score normalization) dynamically')
     # Fx, Fy, Fz weights setup; assuming target='all' order or target='grf_only' order
     # Note: Target specific weight shapes must be configured in run script based on target_type
     
