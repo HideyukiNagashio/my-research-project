@@ -289,7 +289,7 @@ def main():
                     feature_names = get_feature_names(args.target_type)
                     for idx, feat_name in enumerate(feature_names):
                         if idx < len(sub_per_feat):
-                            row[f"{feat_name}_rmse"] = sub_per_feat[idx]['rmse']
+                            row[f"{feat_name}_nrmse"] = sub_per_feat[idx]['nrmse']
                             row[f"{feat_name}_r2"] = sub_per_feat[idx]['r2']
                             
                     fold_subject_rows.append(row)
