@@ -18,6 +18,7 @@ from src.training.dataset import GaitDataset
 from src.training.loss import WeightedMSELoss
 from src.training.engine import Trainer
 from src.models import get_model
+from src.training.metrics import calculate_metrics
 
 def get_dimensions(input_type, target_type):
     # Calculate input_dim
@@ -97,6 +98,7 @@ def main():
         
     cv_metrics = []
     all_per_feat_metrics = []
+    all_subject_metrics = []
     
     # 6-Fold クロスバリデーションの実行
     for fold in range(1, 7):
@@ -205,7 +207,7 @@ def main():
             
         optimizer = optim.Adam(model.parameters(), lr=args.lr)
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode='min', factor=args.factor, patience=5, verbose=True
+            optimizer, mode='min', factor=args.factor, patience=5
         )
         
         # トレーナーの初期化と学習実行
@@ -261,6 +263,42 @@ def main():
                 })
                 meta_path = os.path.join(exp_dir, f'sample_meta_fold{fold}.csv')
                 df_meta.to_csv(meta_path, index=False)
+                
+                # 被験者ごとの評価指標を計算
+                unique_subjects = df_meta['subject_name'].unique()
+                fold_subject_rows = []
+                for sub_name in unique_subjects:
+                    if not sub_name:
+                        continue
+                    mask = (df_meta['subject_name'] == sub_name).values
+                    sub_preds = preds[mask]
+                    sub_targets = targets[mask]
+                    
+                    sub_metrics = calculate_metrics(sub_targets, sub_preds)
+                    sub_per_feat = sub_metrics.pop('per_feature', [])
+                    
+                    row = {
+                        'subject_name': sub_name,
+                        'fold': fold,
+                        'rmse': sub_metrics['rmse'],
+                        'nrmse': sub_metrics['nrmse'],
+                        'mae': sub_metrics['mae'],
+                        'r2': sub_metrics['r2']
+                    }
+                    
+                    feature_names = get_feature_names(args.target_type)
+                    for idx, feat_name in enumerate(feature_names):
+                        if idx < len(sub_per_feat):
+                            row[f"{feat_name}_rmse"] = sub_per_feat[idx]['rmse']
+                            row[f"{feat_name}_r2"] = sub_per_feat[idx]['r2']
+                            
+                    fold_subject_rows.append(row)
+                    all_subject_metrics.append(row)
+                    
+                if len(fold_subject_rows) > 0:
+                    df_sub_metrics = pd.DataFrame(fold_subject_rows)
+                    sub_metrics_path = os.path.join(exp_dir, f'subject_metrics_fold{fold}.csv')
+                    df_sub_metrics.to_csv(sub_metrics_path, index=False, float_format='%.4f')
         except Exception as e:
             print(f"Warning: could not save sample_meta_fold{fold}.csv: {e}")
             
@@ -269,6 +307,8 @@ def main():
         print(f"  - targets_fold{fold}.npy")
         print(f"  - inputs_fold{fold}.npy")
         print(f"  - sample_meta_fold{fold}.csv")
+        if 'fold_subject_rows' in locals() and len(fold_subject_rows) > 0:
+            print(f"  - subject_metrics_fold{fold}.csv")
         
         # 特徴量別のMetrics抽出および保存
         if 'per_feature' in test_metrics:
@@ -318,6 +358,14 @@ def main():
         
         feature_summary.to_csv(os.path.join(exp_dir, 'feature_summary.csv'), index=False, float_format='%.4f')
 
+    # === subject_summary.csv の作成 ===
+    if len(all_subject_metrics) > 0:
+        df_all_subs = pd.DataFrame(all_subject_metrics)
+        df_all_subs = df_all_subs.sort_values(by=['subject_name'])
+        subject_summary_path = os.path.join(exp_dir, 'subject_summary.csv')
+        df_all_subs.to_csv(subject_summary_path, index=False, float_format='%.4f')
+        print(f"Saved subject_summary.csv to {subject_summary_path}")
+        
     print(f"\n{'='*40}")
     print("Cross Validation Complete!")
     print("\n--- Feature Summary (Mean ± Std) ---")
