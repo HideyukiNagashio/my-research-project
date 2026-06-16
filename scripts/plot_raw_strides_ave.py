@@ -29,7 +29,7 @@ COLORS = plt.cm.tab20(np.linspace(0, 1, len(PARTICIPANTS)))
 
 # # 除外する参加者と条件の組み合わせ
 EXCLUDE_KEYS = [
-#     ('kiuchi', 'm'),
+    ('kiuchi', 'm'),
 #     ('kuno', 'm'),
 #     ('konan', 'm'),
 ]

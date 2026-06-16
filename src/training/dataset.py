@@ -26,6 +26,10 @@ class GaitDataset(Dataset):
             self.y = FeatureSelector.get_y(ensemble)
         elif target_type == 'angles_only':
             self.y = FeatureSelector.get_y_angles_only(ensemble)
+        elif target_type == 'angles_6dof':
+            self.y = FeatureSelector.get_y_angles_6dof(ensemble)
+        elif target_type == 'angles_3dof':
+            self.y = FeatureSelector.get_y_angles_3dof(ensemble)
         elif target_type == 'grf_only':
             self.y = FeatureSelector.get_y_grf_only(ensemble)
         else:

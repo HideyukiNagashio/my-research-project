@@ -13,7 +13,7 @@ def get_args_parser():
                         choices=['single_leg', 'bilateral', 'pressure_single', 'pressure_bilateral', 'imu_single', 'imu_bilateral'],
                         help='Input feature selection')
     parser.add_argument('--target_type', type=str, default='all', 
-                        choices=['all', 'angles_only', 'grf_only'],
+                        choices=['all', 'angles_only', 'angles_6dof', 'angles_3dof', 'grf_only'],
                         help='Target feature selection')
     
     # --- Model Settings ---

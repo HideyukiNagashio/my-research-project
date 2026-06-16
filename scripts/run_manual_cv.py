@@ -2,7 +2,7 @@ import pickle
 import numpy as np
 from pathlib import Path
 
-from src.preprocessing.config import ANGLE_SCALE
+from src.preprocessing.config import ANGLE_SCALE, EXCLUDE_KEYS
 from src.preprocessing.pipeline import process_all_data_raw
 from src.preprocessing.normalization import compute_global_stats, apply_global_normalization
 
@@ -68,9 +68,17 @@ def load_cached_raw_data(data_dir: Path):
         data = np.load(path, allow_pickle=True)
         durations = data['durations'] if 'durations' in data else None
         
+        participant = str(data['participant'])
+        condition = str(data['condition'])
+        
+        # configのEXCLUDE_KEYSに含まれる試行はスキップ
+        if (participant, condition) in EXCLUDE_KEYS:
+            print(f"  [EXCLUDE] Skipping: {participant}_{condition}")
+            continue
+            
         all_results.append({
-            'participant': str(data['participant']),
-            'condition': str(data['condition']),
+            'participant': participant,
+            'condition': condition,
             'mass': float(data['mass']),
             'ensemble': data['ensemble'],
             'columns': data['columns'].tolist(),

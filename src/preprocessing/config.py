@@ -15,6 +15,13 @@ CUTOFF_FREQ  = 6
 FILTER_ORDER = 4
 ANGLE_SCALE  = 180.0   # 関節角度スケーリング定数（逆変換: pred × 180）
 
+# 除外する被験者と条件の組み合わせ（例：関節角度のトラッキングエラーが発生した試行など）
+EXCLUDE_KEYS = [
+    # ('kiuchi', 'm'),
+    # ('kuno', 'm'),
+    # ('konan', 'm'),
+]
+
 # マーカーインデックス
 RI  = 0; RGT = 1; RK = 2; RM = 3; RT = 4
 LI  = 5; LGT = 6; LK = 7; LM = 8; LT = 9

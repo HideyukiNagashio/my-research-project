@@ -33,6 +33,8 @@ def get_dimensions(input_type, target_type):
     # Calculate output_dim
     if target_type == 'all': out_dim = 12
     elif target_type == 'angles_only': out_dim = 9
+    elif target_type == 'angles_6dof': out_dim = 6
+    elif target_type == 'angles_3dof': out_dim = 3
     elif target_type == 'grf_only': out_dim = 3
     else: raise ValueError(f"Unknown target_type {target_type}")
 
@@ -59,6 +61,10 @@ def get_feature_names(target_type):
     grf = ['Fx', 'Fy', 'Fz']
     if target_type == 'angles_only':
         return angles
+    elif target_type == 'angles_6dof':
+        return ['Hip_Flex', 'Hip_Abd', 'Hip_Rot', 'Knee_Flex', 'Ankle_Flex', 'Ankle_Abd']
+    elif target_type == 'angles_3dof':
+        return ['Hip_Flex', 'Knee_Flex', 'Ankle_Flex']
     elif target_type == 'grf_only':
         return grf
     elif target_type == 'all':

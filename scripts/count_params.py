@@ -120,6 +120,8 @@ def main():
         # Determine out_dim
         if target_type == 'all': out_dim = 12
         elif target_type == 'angles_only': out_dim = 9
+        elif target_type == 'angles_6dof': out_dim = 6
+        elif target_type == 'angles_3dof': out_dim = 3
         elif target_type == 'grf_only': out_dim = 3
         else:
             continue

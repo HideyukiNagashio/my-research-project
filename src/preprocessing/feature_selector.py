@@ -39,6 +39,16 @@ class FeatureSelector:
         return ensemble[:, :, 14:23]
 
     @staticmethod
+    def get_y_angles_6dof(ensemble):
+        """ターゲット: 主要6自由度のみ (Hip 3DoF, Knee Flex/Ext, Ankle Flex/Ext, Ankle Abd/Add) = (N, T, 6)"""
+        return ensemble[:, :, [14, 15, 16, 17, 20, 21]]
+
+    @staticmethod
+    def get_y_angles_3dof(ensemble):
+        """ターゲット: 矢状面3自由度のみ (Hip Flex/Ext, Knee Flex/Ext, Ankle Flex/Ext) = (N, T, 3)"""
+        return ensemble[:, :, [14, 17, 20]]
+
+    @staticmethod
     def get_y_grf_only(ensemble):
         """ターゲット: 床反力の予測のみ (Fx, Fy, Fz の計3ch) = (N, T, 3)"""
         return ensemble[:, :, 23:26]
