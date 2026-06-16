@@ -1,6 +1,7 @@
 import pickle
 import numpy as np
 from pathlib import Path
+import argparse
 
 from src.preprocessing.config import ANGLE_SCALE, EXCLUDE_KEYS
 from src.preprocessing.pipeline import process_all_data_raw
@@ -52,7 +53,7 @@ FOLDS = [
 # =====================================================================
 # Helper 関数
 # =====================================================================
-def load_cached_raw_data(data_dir: Path):
+def load_cached_raw_data(data_dir: Path, apply_exclude: bool = True):
     """
     Phase 1で出力されたローカルの raw_strides ファイル群を読み込む。
     毎回全処理を行うと時間がかかるため、構築済みのデータをロードして再利用する。
@@ -72,7 +73,7 @@ def load_cached_raw_data(data_dir: Path):
         condition = str(data['condition'])
         
         # configのEXCLUDE_KEYSに含まれる試行はスキップ
-        if (participant, condition) in EXCLUDE_KEYS:
+        if apply_exclude and (participant, condition) in EXCLUDE_KEYS:
             print(f"  [EXCLUDE] Skipping: {participant}_{condition}")
             continue
             
@@ -133,6 +134,11 @@ def save_split_data(output_path: Path, results_list, stats, p_map, c_map):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Create CV Pickles")
+    parser.add_argument('--output_dir', type=str, default='data/processed/cv', help='Output directory path')
+    parser.add_argument('--no_exclude', action='store_true', help='Do not apply EXCLUDE_KEYS filtering')
+    args = parser.parse_args()
+
     print("\n" + "="*55)
     print("  Start Manual Cross Validation Processing")
     print("="*55)
@@ -144,7 +150,7 @@ def main():
     #    すでに抽出＆同期処理済みの .npz ファイルがあればロード。
     #    なければ pipeline 側の関数を叩いて生成する。
     # -------------------------------------------------------------
-    all_results = load_cached_raw_data(raw_dir)
+    all_results = load_cached_raw_data(raw_dir, apply_exclude=not args.no_exclude)
     
     if not all_results:
         print("キャッシュされた raw データがないため、新規に処理を実行します...")
@@ -154,17 +160,17 @@ def main():
         except Exception as e:
             print(f"Error processing raw data: {e}")
             return
-
+            
     if not all_results:
         print("有効なデータが取得できませんでした。終了します。")
         return
-
+        
     # IDマッピングの作成
     unique_p = sorted(set(r['participant'] for r in all_results))
     p_map    = {name: i for i, name in enumerate(unique_p)}
     c_map    = {'h': 0, 'm': 1, 'l': 2}
     
-    base_out_dir = Path('data/processed/cv')
+    base_out_dir = Path(args.output_dir)
     base_out_dir.mkdir(parents=True, exist_ok=True)
     
     # -------------------------------------------------------------
