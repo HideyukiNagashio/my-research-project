@@ -46,8 +46,7 @@ python scripts/train_cv.py \
     --batch_size $BATCH \
     --lr $LR \
     --patience $PATIENCE \
-    --factor $FACTOR \
-    --standardize_y
+    --factor $FACTOR
 
 # 実験2: 片足の圧力
 echo "Running Experiment 2: Pressure Single..."
@@ -68,8 +67,7 @@ python scripts/train_cv.py \
     --batch_size $BATCH \
     --lr $LR \
     --patience $PATIENCE \
-    --factor $FACTOR \
-    --standardize_y
+    --factor $FACTOR
 
 # 実験3: 片足のIMU
 echo "Running Experiment 3: IMU Single..."
@@ -90,8 +88,7 @@ python scripts/train_cv.py \
     --batch_size $BATCH \
     --lr $LR \
     --patience $PATIENCE \
-    --factor $FACTOR \
-    --standardize_y
+    --factor $FACTOR
 
 # 実験4: 両足の圧力，IMU
 echo "Running Experiment 4: Bilateral (Pressure + IMU)..."
@@ -112,8 +109,7 @@ python scripts/train_cv.py \
     --batch_size $BATCH \
     --lr $LR \
     --patience $PATIENCE \
-    --factor $FACTOR \
-    --standardize_y
+    --factor $FACTOR
 
 # 実験5: 両足の圧力
 echo "Running Experiment 5: Pressure Bilateral..."
@@ -134,8 +130,7 @@ python scripts/train_cv.py \
     --batch_size $BATCH \
     --lr $LR \
     --patience $PATIENCE \
-    --factor $FACTOR \
-    --standardize_y
+    --factor $FACTOR
 
 # 実験6: 両足のIMU
 echo "Running Experiment 6: IMU Bilateral..."
@@ -156,7 +151,6 @@ python scripts/train_cv.py \
     --batch_size $BATCH \
     --lr $LR \
     --patience $PATIENCE \
-    --factor $FACTOR \
-    --standardize_y
+    --factor $FACTOR
 
 echo "All 6 experiments completed!"
