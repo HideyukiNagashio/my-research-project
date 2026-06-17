@@ -18,8 +18,18 @@ OUTPUT_DIR = "outputs/raw_strides_plots"
 
 # 実験協力者のリスト (raw_strides ディレクトリ内のファイルから抽出)
 PARTICIPANTS = [
-    'adachi', 'fukuzawa', 'iwasaki', 'john', 'kiuchi', 'konan',
-    'kuno', 'oba', 'obara', 'ono', 'pon', 'yanaze'
+    # 'adachi', 
+    # 'fukuzawa', 
+    # 'iwasaki', 
+    # 'john', 
+    # 'kiuchi', 
+    # 'konan',
+    'kuno', 
+    'oba', 
+    'obara', 
+    'ono', 
+    'pon', 
+    'yanaze'
 ]
 CONDITIONS = ['h', 'm', 'l']
 CONDITION_LABELS = {'h': 'High', 'm': 'Medium', 'l': 'Low'}
@@ -29,9 +39,31 @@ COLORS = plt.cm.tab20(np.linspace(0, 1, len(PARTICIPANTS)))
 
 # # 除外する参加者と条件の組み合わせ
 EXCLUDE_KEYS = [
-    ('kiuchi', 'm'),
-#     ('kuno', 'm'),
-#     ('konan', 'm'),
+    # ('adachi', 'h'),
+    # ('fukuzawa', 'h'),
+    # ('iwasaki', 'h'),
+    # ('john', 'h'),
+    # ('obara', 'h'),
+    # ('ono', 'h'),
+    # ('pon', 'h'),
+    # ('yanaze', 'h'),
+    # ('adachi', 'm'),
+    # ('fukuzawa', 'm'),
+    # ('iwasaki', 'm'),
+    # ('john', 'm'),
+    # ('obara', 'm'),
+    # ('ono', 'm'),
+    # ('pon', 'm'),
+    # ('yanaze', 'm'),
+    # ('adachi', 'l'),
+    # ('fukuzawa', 'l'),
+    # ('iwasaki', 'l'),
+    # ('john', 'l'),
+    # ('obara', 'l'),
+    # ('ono', 'l'),
+    # ('pon', 'l'),
+    # ('yanaze', 'l'),
+    # ('kiuchi', 'm'),
 ]
 
 # ============================================================

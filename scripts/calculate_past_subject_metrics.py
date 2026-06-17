@@ -9,7 +9,7 @@ from src.training.metrics import calculate_metrics
 def main():
     parser = argparse.ArgumentParser(description="Calculate subject-wise metrics for past experiments")
     parser.add_argument("exp_dir", type=str, help="Path to the past experiment directory")
-    parser.add_argument("--data_dir", type=str, default="data/processed/cv", help="Path to the CV data directory")
+    parser.add_argument("--data_dir", type=str, default="data/processed/cv_grf", help="Path to the CV data directory")
     args = parser.parse_args()
     
     # Verify exp_dir exists
@@ -42,7 +42,18 @@ def main():
             
     all_subject_metrics = []
     
-    for fold in range(1, 7):
+    # Dynamically find the number of folds based on preds_fold*.npy files in exp_dir or fold* directories in data_dir
+    import glob
+    preds_files = glob.glob(os.path.join(args.exp_dir, "preds_fold*.npy"))
+    if len(preds_files) > 0:
+        num_folds = len(preds_files)
+    else:
+        fold_dirs = glob.glob(os.path.join(args.data_dir, "fold*"))
+        num_folds = len(fold_dirs) if len(fold_dirs) > 0 else 6
+        
+    print(f"Detected {num_folds} folds for evaluation.")
+    
+    for fold in range(1, num_folds + 1):
         preds_path = os.path.join(args.exp_dir, f"preds_fold{fold}.npy")
         targets_path = os.path.join(args.exp_dir, f"targets_fold{fold}.npy")
         meta_path = os.path.join(args.exp_dir, f"sample_meta_fold{fold}.csv")

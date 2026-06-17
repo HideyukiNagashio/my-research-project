@@ -8,7 +8,7 @@ def get_args_parser():
     parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility')
     
     # --- Data Settings ---
-    parser.add_argument('--data_dir', type=str, default='data/processed/cv', help='Path to 6-fold CV Data')
+    parser.add_argument('--data_dir', type=str, default='data/processed/cv_grf', help='Path to CV Data')
     parser.add_argument('--input_type', type=str, default='bilateral', 
                         choices=['single_leg', 'bilateral', 'pressure_single', 'pressure_bilateral', 'imu_single', 'imu_bilateral'],
                         help='Input feature selection')

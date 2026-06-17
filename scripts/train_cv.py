@@ -106,10 +106,18 @@ def main():
     all_per_feat_metrics = []
     all_subject_metrics = []
     
-    # 6-Fold クロスバリデーションの実行
-    for fold in range(1, 7):
+    # Detect the number of folds dynamically based on fold directories
+    import glob
+    fold_dirs = sorted(glob.glob(os.path.join(args.data_dir, 'fold*')))
+    num_folds = len(fold_dirs)
+    if num_folds == 0:
+        raise FileNotFoundError(f"No fold directories (e.g. fold1, fold2, ...) found in {args.data_dir}")
+    print(f"Detected {num_folds} folds in {args.data_dir}")
+    
+    # クロスバリデーションの実行
+    for fold in range(1, num_folds + 1):
         print(f"\n{'='*40}")
-        print(f" Fold {fold} / 6")
+        print(f" Fold {fold} / {num_folds}")
         print(f"{'='*40}")
         
         fold_dir = os.path.join(args.data_dir, f'fold{fold}')

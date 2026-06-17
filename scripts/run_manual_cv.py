@@ -10,8 +10,10 @@ from src.preprocessing.normalization import compute_global_stats, apply_global_n
 # =====================================================================
 # 1. Foldの手動定義 (6-fold Group Cross Validation)
 # 12名の被験者を Test=2, Val=2, Train=8 で分割
+# ==========================================# =====================================================================
+# 1. Foldの手動定義 (Group Cross Validation)
 # =====================================================================
-FOLDS = [
+GRF_FOLDS = [
     {
         "name": "fold1",
         "test": ['oba', 'ono'],
@@ -47,6 +49,39 @@ FOLDS = [
         "test": ['adachi', 'iwasaki'],
         "val": ['oba', 'ono'],
         "train": ['pon', 'kuno', 'john', 'konan', 'obara', 'fukuzawa', 'kiuchi', 'yanaze']
+    }
+]
+
+ANGLES_FOLDS = [
+    {
+        "name": "fold1",
+        "test": ['oba', 'ono'],
+        "val": ['pon', 'obara'],
+        "train": ['john', 'konan', 'kiuchi', 'fukuzawa', 'adachi', 'iwasaki']
+    },
+    {
+        "name": "fold2",
+        "test": ['pon', 'obara'],
+        "val": ['john', 'konan'],
+        "train": ['kiuchi', 'fukuzawa', 'adachi', 'iwasaki', 'oba', 'ono']
+    },
+    {
+        "name": "fold3",
+        "test": ['john', 'konan'],
+        "val": ['kiuchi', 'fukuzawa'],
+        "train": ['adachi', 'iwasaki', 'oba', 'ono', 'pon', 'obara']
+    },
+    {
+        "name": "fold4",
+        "test": ['kiuchi', 'fukuzawa'],
+        "val": ['adachi', 'iwasaki'],
+        "train": ['oba', 'ono', 'pon', 'obara', 'john', 'konan']
+    },
+    {
+        "name": "fold5",
+        "test": ['adachi', 'iwasaki'],
+        "val": ['oba', 'ono'],
+        "train": ['pon', 'obara', 'john', 'konan', 'kiuchi', 'fukuzawa']
     }
 ]
 
@@ -135,12 +170,20 @@ def save_split_data(output_path: Path, results_list, stats, p_map, c_map):
 
 def main():
     parser = argparse.ArgumentParser(description="Create CV Pickles")
-    parser.add_argument('--output_dir', type=str, default='data/processed/cv', help='Output directory path')
+    parser.add_argument('--cv_type', type=str, default='grf', choices=['grf', 'angles'], help='CV structure to generate')
+    parser.add_argument('--output_dir', type=str, default=None, help='Output directory path')
     parser.add_argument('--no_exclude', action='store_true', help='Do not apply EXCLUDE_KEYS filtering')
     args = parser.parse_args()
 
+    # Determine default output_dir based on cv_type if not specified
+    if args.output_dir is None:
+        if args.cv_type == 'grf':
+            args.output_dir = 'data/processed/cv_grf'
+        else:
+            args.output_dir = 'data/processed/cv_angles'
+
     print("\n" + "="*55)
-    print("  Start Manual Cross Validation Processing")
+    print(f"  Start Manual Cross Validation Processing (CV Type: {args.cv_type})")
     print("="*55)
     
     raw_dir = Path('data/interim/raw_strides')
@@ -165,6 +208,12 @@ def main():
         print("有効なデータが取得できませんでした。終了します。")
         return
         
+    # If cv_type is angles, exclude yanaze and kuno from the results list
+    if args.cv_type == 'angles':
+        exclude_subjects = ['yanaze', 'kuno']
+        all_results = [r for r in all_results if r['participant'] not in exclude_subjects]
+        print(f"Excluding {exclude_subjects} from joint angles CV dataset. Remaining: {len(set(r['participant'] for r in all_results))} subjects.")
+        
     # IDマッピングの作成
     unique_p = sorted(set(r['participant'] for r in all_results))
     p_map    = {name: i for i, name in enumerate(unique_p)}
@@ -173,10 +222,13 @@ def main():
     base_out_dir = Path(args.output_dir)
     base_out_dir.mkdir(parents=True, exist_ok=True)
     
+    # Select target FOLDS config
+    folds_config = ANGLES_FOLDS if args.cv_type == 'angles' else GRF_FOLDS
+    
     # -------------------------------------------------------------
     # 3. Fold ごとの正規化と保存
     # -------------------------------------------------------------
-    for dict_fold in FOLDS:
+    for dict_fold in folds_config:
         fold_name = dict_fold["name"]
         
         # ログ表示の要件
@@ -215,11 +267,11 @@ def main():
             print(f"  [ERROR] {fold_name} の処理中にエラーが発生しました: {e}")
             import traceback
             traceback.print_exc()
-
+ 
     print("\n" + "="*55)
     print("  完了 (CV Processing Complete)")
     print("="*55)
-
-
+ 
+ 
 if __name__ == "__main__":
     main()
