@@ -562,7 +562,8 @@ def main():
                 
                 for idx in indices_to_avg:
                     # Shape (1, seq_len, in_dim)
-                    sample_x = torch.tensor(inputs[idx:idx+1], dtype=torch.float32, requires_grad=True).to(device)
+                    sample_x = torch.tensor(inputs[idx:idx+1], dtype=torch.float32).to(device)
+                    sample_x.requires_grad_(True)
                     # Compute
                     dyn_map = compute_dynamics_map(model, sample_x, out_col=o_c, in_col=i_c)
                     accum_dynamics += dyn_map
@@ -586,7 +587,8 @@ def main():
             accum_average = np.zeros((in_dim, seq_len))
             
             for idx in indices_to_avg:
-                sample_x = torch.tensor(inputs[idx:idx+1], dtype=torch.float32, requires_grad=True).to(device)
+                sample_x = torch.tensor(inputs[idx:idx+1], dtype=torch.float32).to(device)
+                sample_x.requires_grad_(True)
                 mean_map = compute_overall_average_map(model, sample_x, out_col=o_c)
                 accum_average += mean_map
                 
@@ -611,7 +613,8 @@ def main():
                 accum_phase_maps[phase_name] = np.zeros((in_dim, seq_len))
                 
             for idx in indices_to_avg:
-                sample_x = torch.tensor(inputs[idx:idx+1], dtype=torch.float32, requires_grad=True).to(device)
+                sample_x = torch.tensor(inputs[idx:idx+1], dtype=torch.float32).to(device)
+                sample_x.requires_grad_(True)
                 phase_maps = compute_phase_smoothed_maps(model, sample_x, out_col=o_c)
                 for phase_name, p_map in phase_maps.items():
                     accum_phase_maps[phase_name] += p_map
