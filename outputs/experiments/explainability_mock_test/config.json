@@ -1,0 +1,1 @@
+{"model_type": "cnn", "input_type": "single_leg", "target_type": "grf_only", "dropout": 0.1, "hidden_dim": 14, "kernel_size": 7}
