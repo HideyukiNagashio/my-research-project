@@ -82,74 +82,32 @@ def compute_dynamics_map_slow(model, input_data, out_col, in_col):
     return dynamics_map
 
 
-def compute_dynamics_map(model, input_data, out_col, in_col):
+def compute_dynamics_map_all_features(model, input_data, out_col, timers=None):
     """
-    Optimized implementation with 1 forward and 200 backwards.
-    Maintains exact numerical consistency with compute_dynamics_map_slow.
-    """
-    t_start = time.time()
+    Computes absolute gradients for all input features across all output time steps
+    in a single forward pass and seq_len backward passes.
     
-    model.eval()
-    seq_len = input_data.shape[1]
-    dynamics_map = np.zeros((seq_len, seq_len))
-    
-    # 1. Forward pass only once
-    t_forward_start = time.time()
-    outputs = model(input_data)  # Shape: (Batch, seq_len, out_dim)
-    t_forward = time.time() - t_forward_start
-    
-    t_backward = 0.0
-    for x in range(seq_len):
-        # 2. Reset gradients (model.zero_grad is preserved per user specification)
-        if input_data.grad is not None:
-            input_data.grad.zero_()
-        model.zero_grad()
+    Args:
+        model: PyTorch model
+        input_data: Input tensor of shape (1, seq_len, in_dim) with requires_grad=True
+        out_col: Target output index (0~2)
+        timers: Optional dictionary to record breakdown of execution times
         
-        score = outputs[0, x, out_col]
-        
-        # 3. Backward pass. Retain graph for all steps except the last one to release memory.
-        is_last = (x == seq_len - 1)
-        t_backward_start = time.time()
-        score.backward(retain_graph=not is_last)
-        t_backward += time.time() - t_backward_start
-        
-        # 4. Extract gradients
-        if input_data.grad is not None:
-            grad_slice = input_data.grad[0, :, in_col].cpu().numpy()
-            dynamics_map[:, x] = np.abs(grad_slice)
-            
-    t_total = time.time() - t_start
-    t_other = t_total - t_forward - t_backward
-    
-    print(f"\n[Profile: compute_dynamics_map]")
-    print(f"  Forward total:    {t_forward:.4f}s ({t_forward/t_total*100:.1f}%)")
-    print(f"  Backward total:   {t_backward:.4f}s ({t_backward/t_total*100:.1f}%)")
-    print(f"  Other processing: {t_other:.4f}s ({t_other/t_total*100:.1f}%)")
-    print(f"  Total time:       {t_total:.4f}s\n")
-    
-    return dynamics_map
-
-
-def compute_overall_average_map(model, input_data, out_col, timers=None):
-    """
-    Computes an overall average sensitivity map of shape [14, 200]
-    across the entire output sequence.
+    Returns:
+        dynamics_maps: numpy array of shape (in_dim, seq_len, seq_len)
+                       [in_dim, input_time_y, output_time_x]
     """
     t_start = time.time()
     model.eval()
     seq_len = input_data.shape[1]
     in_dim = input_data.shape[2]
     
-    if timers is not None:
-        t_agg_start = time.time()
-    accumulated_grads = np.zeros((seq_len, in_dim))
-    if timers is not None:
-        timers['Aggregation'] += time.time() - t_agg_start
-        
-    # Forward pass only once
+    dynamics_maps = np.zeros((in_dim, seq_len, seq_len))
+    
+    # 1. Forward pass only once
     if timers is not None:
         t_fwd_start = time.time()
-    outputs = model(input_data)
+    outputs = model(input_data)  # Shape: (1, seq_len, out_dim)
     if timers is not None:
         timers['Forward'] += time.time() - t_fwd_start
         timers['forward_calls'] += 1
@@ -161,122 +119,139 @@ def compute_overall_average_map(model, input_data, out_col, timers=None):
         
         score = outputs[0, x, out_col]
         
-        # Backward pass
+        # 2. Backward pass. Retain graph for all steps except the last one to release memory.
         is_last = (x == seq_len - 1)
         if timers is not None:
             t_bwd_start = time.time()
         score.backward(retain_graph=not is_last)
         if timers is not None:
             timers['Backward'] += time.time() - t_bwd_start
-        
-        # Aggregation
-        if timers is not None:
-            t_agg_start = time.time()
-        if input_data.grad is not None:
-            accumulated_grads += np.abs(input_data.grad[0].cpu().numpy())
-        if timers is not None:
-            timers['Aggregation'] += time.time() - t_agg_start
             
+        if input_data.grad is not None:
+            if timers is not None:
+                t_agg_start = time.time()
+            grad_all = np.abs(input_data.grad[0].cpu().numpy())  # Shape: (seq_len, in_dim)
+            dynamics_maps[:, :, x] = grad_all.T
+            if timers is not None:
+                timers['Aggregation'] += time.time() - t_agg_start
+                
     if timers is not None:
-        t_agg_start = time.time()
-    mean_grads = accumulated_grads / seq_len
-    result = mean_grads.T
-    if timers is not None:
-        timers['Aggregation'] += time.time() - t_agg_start
-        # Measure local 'Other' in this function
         elapsed = time.time() - t_start
         measured = timers['Forward'] + timers['Backward'] + timers['Aggregation']
         timers['Other'] += max(0.0, elapsed - measured)
         
-    return result
+    return dynamics_maps
+
+
+def compute_dynamics_map(model, input_data, out_col, in_col):
+    """Wrapper that calls compute_dynamics_map_all_features and slices the specific in_col."""
+    all_dynamics = compute_dynamics_map_all_features(model, input_data, out_col)
+    return all_dynamics[in_col, :, :]
+
+
+def compute_overall_average_map(model, input_data, out_col, timers=None):
+    """Wrapper that uses compute_dynamics_map_all_features and averages over output steps."""
+    all_dynamics = compute_dynamics_map_all_features(model, input_data, out_col, timers=timers)
+    if timers is not None:
+        t_agg_start = time.time()
+    mean_map = np.mean(all_dynamics, axis=2)
+    if timers is not None:
+        timers['Aggregation'] += time.time() - t_agg_start
+    return mean_map
 
 
 def compute_phase_smoothed_maps(model, input_data, out_col, timers=None):
-    """
-    Computes sensitivity maps [14, 200] smoothed (averaged) over 7 gait phases.
-    """
-    t_start = time.time()
-    model.eval()
-    seq_len = input_data.shape[1]
-    in_dim = input_data.shape[2]
+    """Wrapper that uses compute_dynamics_map_all_features and slices/averages by phase slices."""
+    all_dynamics = compute_dynamics_map_all_features(model, input_data, out_col, timers=timers)
     
     if timers is not None:
         t_seg_start = time.time()
+    seq_len = input_data.shape[1]
+    in_dim = input_data.shape[2]
     phase_slices = get_phase_indices(seq_len)
     if timers is not None:
         timers['Phase Segmentation'] += time.time() - t_seg_start
         
     phase_maps = {}
-    
-    # Pre-calculate total active steps to handle the last backward call cleanly
-    total_steps = sum((end_idx - start_idx) for start_idx, end_idx in phase_slices.values())
-    backward_count = 0
-    
-    # Forward pass only once
-    if timers is not None:
-        t_fwd_start = time.time()
-    outputs = model(input_data)
-    if timers is not None:
-        timers['Forward'] += time.time() - t_fwd_start
-        timers['forward_calls'] += 1
-        
     for phase_name, (start_idx, end_idx) in phase_slices.items():
-        phase_steps = end_idx - start_idx
-        if phase_steps == 0:
+        if end_idx - start_idx == 0:
             if timers is not None:
                 t_smooth_start = time.time()
             phase_maps[phase_name] = np.zeros((in_dim, seq_len))
             if timers is not None:
                 timers['Smoothing'] += time.time() - t_smooth_start
+        else:
+            if timers is not None:
+                t_smooth_start = time.time()
+            phase_maps[phase_name] = np.mean(all_dynamics[:, :, start_idx:end_idx], axis=2)
+            if timers is not None:
+                timers['Smoothing'] += time.time() - t_smooth_start
+                
+    if timers is not None:
+        timers['Interpolation'] = 0.0
+        
+    return phase_maps
+
+
+def compute_overall_average_map_slow(model, input_data, out_col):
+    """
+    Original slow implementation of overall average map with 200 forwards and backwards.
+    Used for verification.
+    """
+    model.eval()
+    seq_len = input_data.shape[1]
+    in_dim = input_data.shape[2]
+    accumulated_grads = np.zeros((seq_len, in_dim))
+    
+    for x in range(seq_len):
+        if input_data.grad is not None:
+            input_data.grad.zero_()
+        model.zero_grad()
+        
+        outputs = model(input_data)
+        score = outputs[0, x, out_col]
+        score.backward(retain_graph=True)
+        
+        if input_data.grad is not None:
+            accumulated_grads += np.abs(input_data.grad[0].cpu().numpy())
+            
+    mean_grads = accumulated_grads / seq_len
+    return mean_grads.T
+
+
+def compute_phase_smoothed_maps_slow(model, input_data, out_col):
+    """
+    Original slow implementation of phase-wise maps with 200 forwards and backwards.
+    Used for verification.
+    """
+    model.eval()
+    seq_len = input_data.shape[1]
+    in_dim = input_data.shape[2]
+    phase_slices = get_phase_indices(seq_len)
+    phase_maps = {}
+    
+    for phase_name, (start_idx, end_idx) in phase_slices.items():
+        phase_steps = end_idx - start_idx
+        if phase_steps == 0:
+            phase_maps[phase_name] = np.zeros((in_dim, seq_len))
             continue
             
-        if timers is not None:
-            t_smooth_start = time.time()
         accumulated_grads = np.zeros((seq_len, in_dim))
-        if timers is not None:
-            timers['Smoothing'] += time.time() - t_smooth_start
         
         for x in range(start_idx, end_idx):
             if input_data.grad is not None:
                 input_data.grad.zero_()
             model.zero_grad()
             
+            outputs = model(input_data)
             score = outputs[0, x, out_col]
+            score.backward(retain_graph=True)
             
-            # Backward pass
-            backward_count += 1
-            is_last = (backward_count == total_steps)
-            if timers is not None:
-                t_bwd_start = time.time()
-            score.backward(retain_graph=not is_last)
-            if timers is not None:
-                timers['Backward'] += time.time() - t_bwd_start
-            
-            # Aggregation / accumulation
-            if timers is not None:
-                t_smooth_start = time.time()
             if input_data.grad is not None:
                 accumulated_grads += np.abs(input_data.grad[0].cpu().numpy())
-            if timers is not None:
-                timers['Smoothing'] += time.time() - t_smooth_start
                 
-        if timers is not None:
-            t_smooth_start = time.time()
-        # Average inside the phase duration
         mean_grads = accumulated_grads / phase_steps
-        # Shape [InputDim, SeqLen]
         phase_maps[phase_name] = mean_grads.T
-        if timers is not None:
-            timers['Smoothing'] += time.time() - t_smooth_start
-            
-    if timers is not None:
-        # Interpolation (none done in current code, but we set to 0.0)
-        timers['Interpolation'] = 0.0
-        # Compute Other overhead
-        elapsed = time.time() - t_start
-        measured = (timers['Forward'] + timers['Backward'] + 
-                    timers['Phase Segmentation'] + timers['Smoothing'])
-        timers['Other'] += max(0.0, elapsed - measured)
         
     return phase_maps
 
@@ -285,8 +260,11 @@ def compute_phase_smoothed_maps(model, input_data, out_col, timers=None):
 # Plotting Helpers
 # =====================================================================
 
-def plot_dynamics_map(dynamics_map, out_label, in_label, save_path=None):
+def plot_dynamics_map(dynamics_map, out_label, in_label, save_path=None, timers=None):
     """Plots and saves the dynamics heatmap."""
+    if timers is not None:
+        t_plot_start = time.time()
+        
     plt.figure(figsize=(10, 8))
     
     # Generate labels for 0% to 100% of gait cycle (every 10% / 20 steps)
@@ -301,9 +279,18 @@ def plot_dynamics_map(dynamics_map, out_label, in_label, save_path=None):
     plt.ylabel("Input Time $y$ (% of Gait Cycle)")
     plt.gca().invert_yaxis()  # Keep 0 at bottom
     plt.tight_layout()
+    
+    if timers is not None:
+        timers['Plotting'] += time.time() - t_plot_start
+        
     if save_path:
+        if timers is not None:
+            t_save_start = time.time()
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         plt.savefig(save_path, dpi=150)
+        if timers is not None:
+            timers['Save Figure'] += time.time() - t_save_start
+            
     plt.close()
 
 
@@ -606,25 +593,63 @@ def main():
         fold_out_dir = os.path.join(demo_dir, "fold1")
         os.makedirs(fold_out_dir, exist_ok=True)
         
-        # Numerical & Speed Verification for Dynamics Map (Forward 1x vs 200x)
-        print("\n--- Running Numerical & Performance Verification (out_col=0, in_col=0) ---")
+        # Numerical & Speed Verification for all Approaches
+        print("\n--- Running Numerical & Performance Verification (out_col=0) ---")
         
+        # 1. Slow implementations (benchmark)
         t0 = time.time()
         dynamics_map_slow = compute_dynamics_map_slow(model, input_data, out_col=0, in_col=0)
+        overall_slow = compute_overall_average_map_slow(model, input_data, out_col=0)
+        phase_slow = compute_phase_smoothed_maps_slow(model, input_data, out_col=0)
         time_slow = time.time() - t0
-        print(f"Slow (Forward 200x) Dynamics Map: {time_slow:.4f}s")
         
+        # 2. Fast implementations (unified 3D tensor)
         t1 = time.time()
-        dynamics_map_fast = compute_dynamics_map(model, input_data, out_col=0, in_col=0)
-        time_fast = time.time() - t1
-        print(f"Fast (Forward 1x) Dynamics Map:  {time_fast:.4f}s")
+        # Compute the 3D tensor once
+        all_dynamics = compute_dynamics_map_all_features(model, input_data, out_col=0)
         
-        all_close = np.allclose(dynamics_map_slow, dynamics_map_fast, atol=1e-7, rtol=1e-5)
-        max_abs_error = np.max(np.abs(dynamics_map_slow - dynamics_map_fast))
+        # Reconstruct Approach 1
+        dynamics_map_fast = all_dynamics[0, :, :]
+        
+        # Reconstruct Approach 2
+        overall_fast = np.mean(all_dynamics, axis=2)
+        
+        # Reconstruct Approach 3
+        phase_slices = get_phase_indices(seq_len)
+        phase_fast = {}
+        for phase_name, (start_idx, end_idx) in phase_slices.items():
+            if end_idx - start_idx == 0:
+                phase_fast[phase_name] = np.zeros((in_dim, seq_len))
+            else:
+                phase_fast[phase_name] = np.mean(all_dynamics[:, :, start_idx:end_idx], axis=2)
+        time_fast = time.time() - t1
+        
+        # Compare Dynamics Map
+        all_close_dyn = np.allclose(dynamics_map_slow, dynamics_map_fast, atol=1e-7, rtol=1e-5)
+        max_err_dyn = np.max(np.abs(dynamics_map_slow - dynamics_map_fast))
+        
+        # Compare Overall Average Map
+        all_close_avg = np.allclose(overall_slow, overall_fast, atol=1e-7, rtol=1e-5)
+        max_err_avg = np.max(np.abs(overall_slow - overall_fast))
+        
+        # Compare Phase-wise Maps
+        all_close_phase = True
+        max_err_phase = 0.0
+        for phase_name in phase_slices.keys():
+            close_p = np.allclose(phase_slow[phase_name], phase_fast[phase_name], atol=1e-7, rtol=1e-5)
+            err_p = np.max(np.abs(phase_slow[phase_name] - phase_fast[phase_name]))
+            if not close_p:
+                all_close_phase = False
+            if err_p > max_err_phase:
+                max_err_phase = err_p
+                
         speedup = time_slow / time_fast if time_fast > 0 else 1.0
         
-        print(f"Numerical Equivalence (np.allclose): {all_close}")
-        print(f"Max Absolute Error: {max_abs_error:.4e}")
+        print(f"Dynamics Map numerical match:         {all_close_dyn} (Max Abs Error: {max_err_dyn:.4e})")
+        print(f"Overall Average Map numerical match:  {all_close_avg} (Max Abs Error: {max_err_avg:.4e})")
+        print(f"Phase-wise Maps numerical match:      {all_close_phase} (Max Abs Error: {max_err_phase:.4e})")
+        print(f"Slow total time (Separate 600 Fwd/Bwd): {time_slow:.4f}s")
+        print(f"Fast total time (Unified 1 Fwd/200 Bwd): {time_fast:.4f}s")
         print(f"Speedup Factor: {speedup:.2f}x")
         print("---------------------------------------------------------------------------------\n")
         
@@ -720,66 +745,67 @@ def main():
         
         seq_len = inputs.shape[1]
         
-        # --- Approach 1: Dynamics Maps ---
-        print("\n--> Running Approach 1: Dynamics Maps...")
-        t0_app1 = time.time()
+        phase_slices = get_phase_indices(seq_len)
+        
+        # We will loop over each output column o_c
         for o_c in out_cols:
             out_label = target_names[o_c]
+            
+            # --- 1. Compute and accumulate the 3D dynamics maps across all samples ---
+            accum_3d_dynamics = np.zeros((in_dim, seq_len, seq_len))
+            
+            t_calc_start = time.time()
+            timers_calc = {
+                'Forward': 0.0,
+                'Backward': 0.0,
+                'Aggregation': 0.0,
+                'Other': 0.0,
+                'forward_calls': 0
+            }
+            for idx in indices_to_avg:
+                sample_x = torch.tensor(inputs[idx:idx+1], dtype=torch.float32).to(device)
+                sample_x.requires_grad_(True)
+                
+                # Compute all gradients at once
+                dynamics_3d = compute_dynamics_map_all_features(model, sample_x, out_col=o_c, timers=timers_calc)
+                accum_3d_dynamics += dynamics_3d
+                
+            mean_3d_dynamics = accum_3d_dynamics / len(indices_to_avg)
+            t_calc_total = time.time() - t_calc_start
+            
+            print(f"\n[Profile: Gradient Computation for Output {out_label}]")
+            print(f"  Forward          : {timers_calc['Forward']:.3f}s")
+            print(f"  Backward         : {timers_calc['Backward']:.3f}s")
+            print(f"  Aggregation      : {timers_calc['Aggregation']:.3f}s")
+            print(f"  Other            : {timers_calc['Other']:.3f}s")
+            print(f"  Total            : {t_calc_total:.3f}s")
+            print(f"  Forward calls    : {timers_calc['forward_calls']}")
+            
+            # --- 2. Approach 1: Dynamics Maps ---
+            print(f"\n--> Running Approach 1: Dynamics Maps for Output {out_label}...")
+            t_app1_start = time.time()
+            timers_app1 = {'Plotting': 0.0, 'Save Figure': 0.0}
             for i_c in in_cols:
                 in_label = feature_names[i_c]
+                # Slice the accumulated 3D tensor to get the 2D dynamics map for this column
+                mean_dynamics = mean_3d_dynamics[i_c, :, :]  # Shape: (200, 200)
                 
-                # Accumulated array for averaging
-                accum_dynamics = np.zeros((seq_len, seq_len))
-                
-                for idx in indices_to_avg:
-                    # Shape (1, seq_len, in_dim)
-                    sample_x = torch.tensor(inputs[idx:idx+1], dtype=torch.float32).to(device)
-                    sample_x.requires_grad_(True)
-                    # Compute
-                    dyn_map = compute_dynamics_map(model, sample_x, out_col=o_c, in_col=i_c)
-                    accum_dynamics += dyn_map
-                    
-                mean_dynamics = accum_dynamics / len(indices_to_avg)
-                
-                # Plot
                 save_path = os.path.join(
                     fold_out_dir, 
                     "dynamics", 
                     f"dynamics_map_{out_label}_vs_{in_label}{sample_suffix}.png"
                 )
-                plot_dynamics_map(mean_dynamics, out_label, in_label, save_path)
-            print(f"Completed Dynamics Maps for Output {out_label}")
-        print(f"Approach 1 Time: {time.time()-t0_app1:.3f}s")
+                plot_dynamics_map(mean_dynamics, out_label, in_label, save_path, timers=timers_app1)
+            t_app1_total = time.time() - t_app1_start
+            print(f"Approach 1 (Plotting & Saving) Time: {t_app1_total:.3f}s")
+            print(f"  Plotting    : {timers_app1['Plotting']:.3f}s")
+            print(f"  Save Figure : {timers_app1['Save Figure']:.3f}s")
             
-        # --- Approach 2: Overall Average Maps ---
-        print("\n--> Running Approach 2: Overall Average Maps...")
-        t0_app2 = time.time()
-        timers_app2 = {
-            'Forward': 0.0,
-            'Backward': 0.0,
-            'Aggregation': 0.0,
-            'Plotting': 0.0,
-            'Save Figure': 0.0,
-            'Other': 0.0,
-            'forward_calls': 0
-        }
-        for o_c in out_cols:
-            out_label = target_names[o_c]
-            
-            accum_average = np.zeros((in_dim, seq_len))
-            
-            for idx in indices_to_avg:
-                sample_x = torch.tensor(inputs[idx:idx+1], dtype=torch.float32).to(device)
-                sample_x.requires_grad_(True)
-                mean_map = compute_overall_average_map(model, sample_x, out_col=o_c, timers=timers_app2)
-                
-                t_agg_start = time.time()
-                accum_average += mean_map
-                timers_app2['Aggregation'] += time.time() - t_agg_start
-                
-            t_agg_start = time.time()
-            mean_average = accum_average / len(indices_to_avg)
-            timers_app2['Aggregation'] += time.time() - t_agg_start
+            # --- 3. Approach 2: Overall Average Maps ---
+            print(f"\n--> Running Approach 2: Overall Average Maps for Output {out_label}...")
+            t_app2_start = time.time()
+            timers_app2 = {'Plotting': 0.0, 'Save Figure': 0.0}
+            mean_average = np.mean(mean_3d_dynamics, axis=2)  # Shape: (14, 200)
             
             save_path = os.path.join(
                 fold_out_dir, 
@@ -787,92 +813,35 @@ def main():
                 f"overall_average_map_{out_label}{sample_suffix}.png"
             )
             plot_overall_average_map(mean_average, out_label, feature_names, save_path, timers=timers_app2)
+            t_app2_total = time.time() - t_app2_start
             print(f"Completed Overall Average Map for Output {out_label}")
+            print(f"Approach 2 (Plotting & Saving) Time: {t_app2_total:.3f}s")
+            print(f"  Plotting    : {timers_app2['Plotting']:.3f}s")
+            print(f"  Save Figure : {timers_app2['Save Figure']:.3f}s")
             
-        t_total_app2 = time.time() - t0_app2
-        measured_app2 = (timers_app2['Forward'] + timers_app2['Backward'] + 
-                         timers_app2['Aggregation'] + timers_app2['Plotting'] + 
-                         timers_app2['Save Figure'])
-        timers_app2['Other'] = max(0.0, t_total_app2 - measured_app2)
-        
-        print("\n[Profile: Overall Average Map]")
-        print(f"Forward          : {timers_app2['Forward']:.3f}s")
-        print(f"Backward         : {timers_app2['Backward']:.3f}s")
-        print(f"Aggregation      : {timers_app2['Aggregation']:.3f}s")
-        print(f"Plotting         : {timers_app2['Plotting']:.3f}s")
-        print(f"Save Figure      : {timers_app2['Save Figure']:.3f}s")
-        print(f"Other            : {timers_app2['Other']:.3f}s")
-        print(f"Total            : {t_total_app2:.3f}s")
-        print(f"Approach 2 model forward calls = {timers_app2['forward_calls']}")
-        print(f"Approach 2 Time: {t_total_app2:.3f}s\n")
+            # --- 4. Approach 3: Phase-wise Smoothed Maps ---
+            print(f"\n--> Running Approach 3: Phase-wise Smoothed Maps for Output {out_label}...")
+            t_app3_start = time.time()
+            timers_app3 = {'Plotting': 0.0, 'Save Figure': 0.0}
             
-        # --- Approach 3: Phase-wise Smoothed Maps ---
-        print("\n--> Running Approach 3: Phase-wise Smoothed Maps...")
-        t0_app3 = time.time()
-        timers_app3 = {
-            'Forward': 0.0,
-            'Backward': 0.0,
-            'Phase Segmentation': 0.0,
-            'Interpolation': 0.0,
-            'Smoothing': 0.0,
-            'Plotting': 0.0,
-            'Save Figure': 0.0,
-            'Other': 0.0,
-            'forward_calls': 0
-        }
-        for o_c in out_cols:
-            out_label = target_names[o_c]
-            
-            # Initialize accumulated phase maps dict
-            t_smooth_start = time.time()
-            accum_phase_maps = {}
-            for phase_name in DEFAULT_GAIT_PHASES.keys():
-                accum_phase_maps[phase_name] = np.zeros((in_dim, seq_len))
-            timers_app3['Smoothing'] += time.time() - t_smooth_start
-                
-            for idx in indices_to_avg:
-                sample_x = torch.tensor(inputs[idx:idx+1], dtype=torch.float32).to(device)
-                sample_x.requires_grad_(True)
-                phase_maps = compute_phase_smoothed_maps(model, sample_x, out_col=o_c, timers=timers_app3)
-                
-                t_smooth_start = time.time()
-                for phase_name, p_map in phase_maps.items():
-                    accum_phase_maps[phase_name] += p_map
-                timers_app3['Smoothing'] += time.time() - t_smooth_start
-                    
-            t_smooth_start = time.time()
             mean_phase_maps = {}
-            for phase_name in DEFAULT_GAIT_PHASES.keys():
-                mean_phase_maps[phase_name] = accum_phase_maps[phase_name] / len(indices_to_avg)
-            timers_app3['Smoothing'] += time.time() - t_smooth_start
-                
+            for phase_name, (start_idx, end_idx) in phase_slices.items():
+                if end_idx - start_idx == 0:
+                    mean_phase_maps[phase_name] = np.zeros((in_dim, seq_len))
+                else:
+                    mean_phase_maps[phase_name] = np.mean(mean_3d_dynamics[:, :, start_idx:end_idx], axis=2)
+                    
             save_path = os.path.join(
                 fold_out_dir, 
                 "phase", 
                 f"phase_wise_smoothed_maps_{out_label}{sample_suffix}.png"
             )
             plot_phase_smoothed_maps(mean_phase_maps, out_label, feature_names, save_path, timers=timers_app3)
+            t_app3_total = time.time() - t_app3_start
             print(f"Completed Phase-wise Smoothed Maps for Output {out_label}")
-            
-        t_total_app3 = time.time() - t0_app3
-        measured_app3 = (timers_app3['Forward'] + timers_app3['Backward'] + 
-                         timers_app3['Phase Segmentation'] + timers_app3['Interpolation'] + 
-                         timers_app3['Smoothing'] + timers_app3['Plotting'] + 
-                         timers_app3['Save Figure'])
-        timers_app3['Other'] = max(0.0, t_total_app3 - measured_app3)
-        
-        print("\n[Profile: Phase-wise Smoothed Maps]")
-        print(f"Forward           : {timers_app3['Forward']:.3f}s")
-        print(f"Backward          : {timers_app3['Backward']:.3f}s")
-        print(f"Phase Segmentation: {timers_app3['Phase Segmentation']:.3f}s")
-        print(f"Interpolation     : {timers_app3['Interpolation']:.3f}s")
-        print(f"Smoothing         : {timers_app3['Smoothing']:.3f}s")
-        print(f"Plotting          : {timers_app3['Plotting']:.3f}s")
-        print(f"Save Figure       : {timers_app3['Save Figure']:.3f}s")
-        print(f"Other             : {timers_app3['Other']:.3f}s")
-        print(f"Total             : {t_total_app3:.3f}s")
-        print(f"Approach 3 model forward calls = {timers_app3['forward_calls']}")
-        print(f"Approach 3 Time: {t_total_app3:.3f}s\n")
+            print(f"Approach 3 (Plotting & Saving) Time: {t_app3_total:.3f}s")
+            print(f"  Plotting    : {timers_app3['Plotting']:.3f}s")
+            print(f"  Save Figure : {timers_app3['Save Figure']:.3f}s")
             
         print(f"\nFold {fold} processing complete. Outputs saved to: {fold_out_dir}")
         
