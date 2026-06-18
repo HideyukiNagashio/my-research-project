@@ -56,40 +56,58 @@ def get_phase_indices(seq_len=200):
 # Core Computation Algorithms
 # =====================================================================
 
-def compute_dynamics_map(model, input_data, out_col, in_col):
+def compute_dynamics_map_slow(model, input_data, out_col, in_col):
     """
-    Computes a [200, 200] dynamics matrix of absolute gradients.
-    
-    Args:
-        model: PyTorch model
-        input_data: Input tensor of shape (1, SeqLen, InputDim) with requires_grad=True
-        out_col: Target output index (0~2 for Fx, Fy, Fz)
-        in_col: Target input index (0~13 for features)
-        
-    Returns:
-        dynamics_map: numpy array of shape (SeqLen, SeqLen) (vertical: input_time y, horizontal: output_time x)
+    Original slow implementation doing 200 forwards and 200 backwards.
+    Used exclusively for verification comparisons.
     """
     model.eval()
     seq_len = input_data.shape[1]
     dynamics_map = np.zeros((seq_len, seq_len))
     
     for x in range(seq_len):
-        # 1. Reset gradients
         if input_data.grad is not None:
             input_data.grad.zero_()
         model.zero_grad()
         
-        # 2. Forward pass
-        outputs = model(input_data)  # Shape: (Batch, seq_len, out_dim)
+        outputs = model(input_data)
         score = outputs[0, x, out_col]
-        
-        # 3. Backward pass to extract input-gradients
         score.backward(retain_graph=True)
         
-        # 4. Extract target input column gradients across all time steps
         if input_data.grad is not None:
             grad_slice = input_data.grad[0, :, in_col].cpu().numpy()
-            # Absolute gradient representation (vertical: input_time y, horizontal: output_time x)
+            dynamics_map[:, x] = np.abs(grad_slice)
+            
+    return dynamics_map
+
+
+def compute_dynamics_map(model, input_data, out_col, in_col):
+    """
+    Optimized implementation with 1 forward and 200 backwards.
+    Maintains exact numerical consistency with compute_dynamics_map_slow.
+    """
+    model.eval()
+    seq_len = input_data.shape[1]
+    dynamics_map = np.zeros((seq_len, seq_len))
+    
+    # 1. Forward pass only once
+    outputs = model(input_data)  # Shape: (Batch, seq_len, out_dim)
+    
+    for x in range(seq_len):
+        # 2. Reset gradients (model.zero_grad is preserved per user specification)
+        if input_data.grad is not None:
+            input_data.grad.zero_()
+        model.zero_grad()
+        
+        score = outputs[0, x, out_col]
+        
+        # 3. Backward pass. Retain graph for all steps except the last one to release memory.
+        is_last = (x == seq_len - 1)
+        score.backward(retain_graph=not is_last)
+        
+        # 4. Extract gradients
+        if input_data.grad is not None:
+            grad_slice = input_data.grad[0, :, in_col].cpu().numpy()
             dynamics_map[:, x] = np.abs(grad_slice)
             
     return dynamics_map
@@ -477,6 +495,29 @@ def main():
         # Fold output dir simulation
         fold_out_dir = os.path.join(demo_dir, "fold1")
         os.makedirs(fold_out_dir, exist_ok=True)
+        
+        # Numerical & Speed Verification for Dynamics Map (Forward 1x vs 200x)
+        print("\n--- Running Numerical & Performance Verification (out_col=0, in_col=0) ---")
+        import time
+        
+        t0 = time.time()
+        dynamics_map_slow = compute_dynamics_map_slow(model, input_data, out_col=0, in_col=0)
+        time_slow = time.time() - t0
+        print(f"Slow (Forward 200x) Dynamics Map: {time_slow:.4f}s")
+        
+        t1 = time.time()
+        dynamics_map_fast = compute_dynamics_map(model, input_data, out_col=0, in_col=0)
+        time_fast = time.time() - t1
+        print(f"Fast (Forward 1x) Dynamics Map:  {time_fast:.4f}s")
+        
+        all_close = np.allclose(dynamics_map_slow, dynamics_map_fast, atol=1e-7, rtol=1e-5)
+        max_abs_error = np.max(np.abs(dynamics_map_slow - dynamics_map_fast))
+        speedup = time_slow / time_fast if time_fast > 0 else 1.0
+        
+        print(f"Numerical Equivalence (np.allclose): {all_close}")
+        print(f"Max Absolute Error: {max_abs_error:.4e}")
+        print(f"Speedup Factor: {speedup:.2f}x")
+        print("---------------------------------------------------------------------------------\n")
         
         # Approach 1: Dynamics
         print("\n--- Approach 1: Computing [Input Time y, Output Time x] Dynamics Maps (Demo) ---")
