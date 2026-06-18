@@ -22,6 +22,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import torch
 import torch.nn as nn
+import time
 
 # Add the project root to the python path to import src modules if needed
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -86,13 +87,18 @@ def compute_dynamics_map(model, input_data, out_col, in_col):
     Optimized implementation with 1 forward and 200 backwards.
     Maintains exact numerical consistency with compute_dynamics_map_slow.
     """
+    t_start = time.time()
+    
     model.eval()
     seq_len = input_data.shape[1]
     dynamics_map = np.zeros((seq_len, seq_len))
     
     # 1. Forward pass only once
+    t_forward_start = time.time()
     outputs = model(input_data)  # Shape: (Batch, seq_len, out_dim)
+    t_forward = time.time() - t_forward_start
     
+    t_backward = 0.0
     for x in range(seq_len):
         # 2. Reset gradients (model.zero_grad is preserved per user specification)
         if input_data.grad is not None:
@@ -103,13 +109,24 @@ def compute_dynamics_map(model, input_data, out_col, in_col):
         
         # 3. Backward pass. Retain graph for all steps except the last one to release memory.
         is_last = (x == seq_len - 1)
+        t_backward_start = time.time()
         score.backward(retain_graph=not is_last)
+        t_backward += time.time() - t_backward_start
         
         # 4. Extract gradients
         if input_data.grad is not None:
             grad_slice = input_data.grad[0, :, in_col].cpu().numpy()
             dynamics_map[:, x] = np.abs(grad_slice)
             
+    t_total = time.time() - t_start
+    t_other = t_total - t_forward - t_backward
+    
+    print(f"\n[Profile: compute_dynamics_map]")
+    print(f"  Forward total:    {t_forward:.4f}s ({t_forward/t_total*100:.1f}%)")
+    print(f"  Backward total:   {t_backward:.4f}s ({t_backward/t_total*100:.1f}%)")
+    print(f"  Other processing: {t_other:.4f}s ({t_other/t_total*100:.1f}%)")
+    print(f"  Total time:       {t_total:.4f}s\n")
+    
     return dynamics_map
 
 
@@ -498,7 +515,6 @@ def main():
         
         # Numerical & Speed Verification for Dynamics Map (Forward 1x vs 200x)
         print("\n--- Running Numerical & Performance Verification (out_col=0, in_col=0) ---")
-        import time
         
         t0 = time.time()
         dynamics_map_slow = compute_dynamics_map_slow(model, input_data, out_col=0, in_col=0)
@@ -613,6 +629,7 @@ def main():
         
         # --- Approach 1: Dynamics Maps ---
         print("\n--> Running Approach 1: Dynamics Maps...")
+        t0_app1 = time.time()
         for o_c in out_cols:
             out_label = target_names[o_c]
             for i_c in in_cols:
@@ -639,9 +656,11 @@ def main():
                 )
                 plot_dynamics_map(mean_dynamics, out_label, in_label, save_path)
             print(f"Completed Dynamics Maps for Output {out_label}")
+        print(f"Approach 1 Time: {time.time()-t0_app1:.3f}s")
             
         # --- Approach 2: Overall Average Maps ---
         print("\n--> Running Approach 2: Overall Average Maps...")
+        t0_app2 = time.time()
         for o_c in out_cols:
             out_label = target_names[o_c]
             
@@ -662,9 +681,11 @@ def main():
             )
             plot_overall_average_map(mean_average, out_label, feature_names, save_path)
             print(f"Completed Overall Average Map for Output {out_label}")
+        print(f"Approach 2 Time: {time.time()-t0_app2:.3f}s")
             
         # --- Approach 3: Phase-wise Smoothed Maps ---
         print("\n--> Running Approach 3: Phase-wise Smoothed Maps...")
+        t0_app3 = time.time()
         for o_c in out_cols:
             out_label = target_names[o_c]
             
@@ -691,6 +712,7 @@ def main():
             )
             plot_phase_smoothed_maps(mean_phase_maps, out_label, feature_names, save_path)
             print(f"Completed Phase-wise Smoothed Maps for Output {out_label}")
+        print(f"Approach 3 Time: {time.time()-t0_app3:.3f}s")
             
         print(f"\nFold {fold} processing complete. Outputs saved to: {fold_out_dir}")
         
