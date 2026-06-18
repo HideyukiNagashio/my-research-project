@@ -146,25 +146,26 @@ def compute_overall_average_map(model, input_data, out_col, timers=None):
     if timers is not None:
         timers['Aggregation'] += time.time() - t_agg_start
         
+    # Forward pass only once
+    if timers is not None:
+        t_fwd_start = time.time()
+    outputs = model(input_data)
+    if timers is not None:
+        timers['Forward'] += time.time() - t_fwd_start
+        timers['forward_calls'] += 1
+        
     for x in range(seq_len):
         if input_data.grad is not None:
             input_data.grad.zero_()
         model.zero_grad()
         
-        # Forward pass
-        if timers is not None:
-            t_fwd_start = time.time()
-        outputs = model(input_data)
-        if timers is not None:
-            timers['Forward'] += time.time() - t_fwd_start
-            timers['forward_calls'] += 1
-            
         score = outputs[0, x, out_col]
         
         # Backward pass
+        is_last = (x == seq_len - 1)
         if timers is not None:
             t_bwd_start = time.time()
-        score.backward(retain_graph=True)
+        score.backward(retain_graph=not is_last)
         if timers is not None:
             timers['Backward'] += time.time() - t_bwd_start
         
@@ -207,6 +208,18 @@ def compute_phase_smoothed_maps(model, input_data, out_col, timers=None):
         
     phase_maps = {}
     
+    # Pre-calculate total active steps to handle the last backward call cleanly
+    total_steps = sum((end_idx - start_idx) for start_idx, end_idx in phase_slices.values())
+    backward_count = 0
+    
+    # Forward pass only once
+    if timers is not None:
+        t_fwd_start = time.time()
+    outputs = model(input_data)
+    if timers is not None:
+        timers['Forward'] += time.time() - t_fwd_start
+        timers['forward_calls'] += 1
+        
     for phase_name, (start_idx, end_idx) in phase_slices.items():
         phase_steps = end_idx - start_idx
         if phase_steps == 0:
@@ -228,20 +241,14 @@ def compute_phase_smoothed_maps(model, input_data, out_col, timers=None):
                 input_data.grad.zero_()
             model.zero_grad()
             
-            # Forward pass
-            if timers is not None:
-                t_fwd_start = time.time()
-            outputs = model(input_data)
-            if timers is not None:
-                timers['Forward'] += time.time() - t_fwd_start
-                timers['forward_calls'] += 1
-                
             score = outputs[0, x, out_col]
             
             # Backward pass
+            backward_count += 1
+            is_last = (backward_count == total_steps)
             if timers is not None:
                 t_bwd_start = time.time()
-            score.backward(retain_graph=True)
+            score.backward(retain_graph=not is_last)
             if timers is not None:
                 timers['Backward'] += time.time() - t_bwd_start
             
