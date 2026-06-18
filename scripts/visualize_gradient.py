@@ -184,10 +184,17 @@ def compute_phase_smoothed_maps(model, input_data, out_col):
 def plot_dynamics_map(dynamics_map, out_label, in_label, save_path=None):
     """Plots and saves the dynamics heatmap."""
     plt.figure(figsize=(10, 8))
-    sns.heatmap(dynamics_map, cmap="rocket_r", xticklabels=20, yticklabels=20, cbar_kws={'label': 'Gradient Magnitude'})
+    
+    # Generate labels for 0% to 100% of gait cycle (every 10% / 20 steps)
+    time_labels = ["" for _ in range(200)]
+    for i in range(0, 200, 20):
+        time_labels[i] = f"{int(i * 0.5)}%"
+    time_labels[-1] = "100%"
+    
+    sns.heatmap(dynamics_map, cmap="rocket_r", xticklabels=time_labels, yticklabels=time_labels, cbar_kws={'label': 'Gradient Magnitude'})
     plt.title(f"Dynamics Map ({out_label} Output vs {in_label} Input)\nVertical: Input Time $y$, Horizontal: Output Time $x$")
-    plt.xlabel("Output Time Step $x$ (0 - 199)")
-    plt.ylabel("Input Time Step $y$ (0 - 199)")
+    plt.xlabel("Output Time $x$ (% of Gait Cycle)")
+    plt.ylabel("Input Time $y$ (% of Gait Cycle)")
     plt.gca().invert_yaxis()  # Keep 0 at bottom
     plt.tight_layout()
     if save_path:
@@ -199,9 +206,16 @@ def plot_dynamics_map(dynamics_map, out_label, in_label, save_path=None):
 def plot_overall_average_map(mean_map, out_label, feature_names, save_path=None):
     """Plots and saves the overall average sensitivity heatmap."""
     plt.figure(figsize=(12, 6))
-    sns.heatmap(mean_map, cmap="rocket_r", xticklabels=20, yticklabels=feature_names, cbar_kws={'label': 'Mean Gradient Magnitude'})
+    
+    # Generate labels for 0% to 100% of gait cycle (every 10% / 20 steps)
+    time_labels = ["" for _ in range(200)]
+    for i in range(0, 200, 20):
+        time_labels[i] = f"{int(i * 0.5)}%"
+    time_labels[-1] = "100%"
+    
+    sns.heatmap(mean_map, cmap="rocket_r", xticklabels=time_labels, yticklabels=feature_names, cbar_kws={'label': 'Mean Gradient Magnitude'})
     plt.title(f"Overall Average Sensitivity Map ({out_label} Output)\nVertical: Input Columns, Horizontal: Input Time $y$")
-    plt.xlabel("Input Time Step $y$ (0 - 199)")
+    plt.xlabel("Input Time $y$ (% of Gait Cycle)")
     plt.ylabel("Input Features")
     plt.tight_layout()
     if save_path:
@@ -219,13 +233,19 @@ def plot_phase_smoothed_maps(phase_maps, out_label, feature_names, save_path=Non
     global_max = max(p_map.max() for p_map in phase_maps.values()) if len(phase_maps) > 0 else 1.0
     if global_max <= 0:
         global_max = 1.0
+        
+    # Generate labels for 0% to 100% of gait cycle (every 10% / 20 steps)
+    time_labels = ["" for _ in range(200)]
+    for i in range(0, 200, 20):
+        time_labels[i] = f"{int(i * 0.5)}%"
+    time_labels[-1] = "100%"
     
     for i, phase_name in enumerate(phases):
         ax = axes[i]
         sns.heatmap(
             phase_maps[phase_name], 
             cmap="rocket_r", 
-            xticklabels=20, 
+            xticklabels=time_labels, 
             yticklabels=feature_names if i == 0 or i == 3 or i == 6 else False,
             vmin=0.0, 
             vmax=global_max, 
@@ -235,7 +255,7 @@ def plot_phase_smoothed_maps(phase_maps, out_label, feature_names, save_path=Non
         ax.set_title(f"Phase: {phase_name} ({DEFAULT_GAIT_PHASES[phase_name][0]:.0f}% - {DEFAULT_GAIT_PHASES[phase_name][1]:.0f}%)")
         ax.set_ylabel("Input Features" if i == 0 or i == 3 or i == 6 else "")
         
-    plt.xlabel("Input Time Step $y$ (0 - 199)")
+    plt.xlabel("Input Time $y$ (% of Gait Cycle)")
     plt.suptitle(f"Phase-wise Smoothed Sensitivity Maps ({out_label} Output)\nVertical: Features, Horizontal: Input Time", y=0.99, fontsize=14)
     plt.tight_layout()
     if save_path:
