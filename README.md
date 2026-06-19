@@ -362,5 +362,83 @@ attention_plots/
 └── phase_matrix/   # 7x7 歩行フェーズ間関係マトリクス (2D)
 ```
 
+## 15. 入力勾配を用いた感度可視化 (Input-Gradient Explainability Framework)
+
+モデル（CNN, BiLSTM, Transformerなどすべてに対応）が予測を行う際、入力されたウェアラブルセンサデータの「どの特徴量」や「どの時間帯」にどれほど敏感に反応（依存）しているかを、入力勾配法（Vanilla Backpropagation）に基づいて解析・可視化するツール `scripts/visualize_gradient.py` を実装しています。
+
+### 15.1 やっていること（基本原理）
+本フレームワークでは、出力の特定のタイムステップの予測値に対する、入力テンソル（`1 x seq_len x in_dim`）の各要素の偏微分係数（勾配）を計算します。
+勾配の絶対値 $\left| \frac{\partial \hat{y}_{t_{out}, c_{out}}}{\partial x_{t_{in}, c_{in}}} \right|$ は、入力の微小な変化が出力予測値に与える影響度（感度）を表します。
+
+### 15.2 できること（3つの解析アプローチ）
+
+1. **アプローチ1: Dynamics Map (時間ダイナミクス感度マップ - `[200, 200]`)**
+   - **内容**: 特定の「出力特徴量 $c_{out}$」と「入力特徴量 $c_{in}$」のペアについて、出力時間 $x$ (0%～100%) と入力時間 $y$ (0%～100%) の関係性を表す2次元ヒートマップを描画します。
+   - **用途**: センサへの入力があった時間帯が、どのタイミングの予測値に伝播しているか（時間的な遅延やブレンド特性）を可視化します。
+
+2. **アプローチ2: Overall Average Map (全体平均感度マップ - `[in_dim, 200]`)**
+   - **内容**: 特定の「出力特徴量 $c_{out}$」に対し、全出力時間 $x$ (0%～100%) にわたる勾配の絶対値を時間平均したものです。縦軸に入力特徴量（14または28次元）、横軸に入力時間 $y$ (0%～100%) をとる2次元ヒートマップを描画します。
+   - **用途**: 歩行周期全体を通じて、どの入力センサ特徴量のどのタイミングが予測に最も寄与しているかを一目で俯瞰できます。
+
+3. **アプローチ3: Phase-wise Smoothed Maps (歩行フェーズ別感度マップ - `[in_dim, 200]`)**
+   - **内容**: 歩行周期の標準的な7つのフェーズ（LR, MSt, TSt, PSw, ISw, MSw, TSw）それぞれの出力時間区間にわたって勾配絶対値を平均化し、7つのサブプロットとして並べたヒートマップを描画します。
+   - **用途**: 「踵接地時（LR）」や「立脚後期（TSt）」など、特定の歩行相（フェーズ）ごとにモデルが注目する入力特徴量・センサ位置がどのように動的に変化するかを解釈できます。
+
+> [!NOTE]
+> **計算効率の大幅な最適化**
+> 従来の単純実装では、全入力特徴量および各アプローチで個別に順伝播・逆伝播を繰り返すため、1つの出力チャネルあたり $3,200$ 回（200ステップ × 16項目）の PyTorch `backward()` 呼び出しが必要でした。
+> 本フレームワークでは、入力特徴量の軸を一括保持した 3D 勾配テンソル `(in_dim, 200, 200)` を **1回の Forward / 200回の Backward** のみで一括生成し、そこから各アプローチ（スライス、全体平均、フェーズ別平均）を NumPy で高速に再構築する設計を採用しています。これにより、計算量が **16分の1に削減** され、実測値で **約17倍の高速化** を実現しています。
+
+### 15.3 実行コマンド
+
+#### A. デモモード (Standalone Demo Mode)
+学習済みモデルやデータセットがない環境でも、ダミーの歩行波形データおよびダミーのニューラルネットワーク（`MockGaitModel`）を用いて、可視化と最適化ロジックの動作確認・速度検証を即座に行えます。
+```bash
+python scripts/visualize_gradient.py
+```
+*※ 実行後、`outputs/experiments/explainability_demo/fold1/` 以下にサンプルヒートマップ一式が保存されます。*
+
+#### B. 本番実験結果への適用 (単一サンプル・単一Fold解析)
+特定の実験ディレクトリを指定し、指定した被験者テストデータの特定サンプル（例: `sample_idx 0`）について可視化します。
+```bash
+PYTHONPATH="$(pwd)" ./env/bin/python scripts/visualize_gradient.py \
+    --exp_dir outputs/experiments/cnn_grf_single_20260416_160500 \
+    --fold 1 \
+    --sample_idx 0 \
+    --out_col 0 \
+    --in_col 0
+```
+
+#### C. グローバル感度解析 (全テストデータ平均・全チャネル出力)
+`--sample_idx -1` を指定すると、テストスプリットに含まれる**全歩行サイクルの勾配の絶対値を平均化**し、モデル全体のグローバルな感度（Global Explainability）を算出します。
+さらに、`--fold all` や `--out_col all`, `--in_col all` を指定することで、全 Fold・全出力・全入力を自動でループ処理し、一括で画像生成できます。
+```bash
+PYTHONPATH="$(pwd)" ./env/bin/python scripts/visualize_gradient.py \
+    --exp_dir outputs/experiments/cnn_grf_single_20260416_160500 \
+    --fold all \
+    --sample_idx -1 \
+    --out_col all \
+    --in_col all
+```
+
+### 15.4 結果の保存先
+
+指定した実験ディレクトリ配下の `gradient_plots/` に、各 Fold およびアプローチごとに整理されて保存されます。
+実験設定の `feature_names.json` や `target_names.json` がある場合は、自動的にグラフの軸やタイトル、ファイル名に物理名（`P1`, `AccX`, `Fx`等）が適用されます。
+
+```text
+outputs/experiments/【実験名】/gradient_plots/
+└── fold{X}/
+    ├── dynamics/   # Approach 1: 1対1の時間ダイナミクス感度マップ
+    │   └── dynamics_map_{出力名}_vs_{入力名}_sample_{IDX}.png
+    │
+    ├── average/    # Approach 2: 全体平均感度マップ
+    │   └── overall_average_map_{出力名}_sample_{IDX}.png
+    │
+    └── phase/      # Approach 3: 7歩行フェーズ別感度マップ (7サブプロット)
+        └── phase_wise_smoothed_maps_{出力名}_sample_{IDX}.png
+```
+
 ---
 *この体系化された統合基盤により、再現性の確保やデータリークの構造的な回避が実現されており、開発者および共同研究者はより上位の「比較検証」と「研究論文執筆」等に注力することが可能です。*
+
