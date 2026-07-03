@@ -219,9 +219,15 @@ def main():
         else:
             criterion = nn.MSELoss()
             
-        optimizer = optim.Adam(model.parameters(), lr=args.lr)
+        # Z-score正規化時はスケール低下に合わせて初期LRを小さくする（例: 1/10）
+        actual_lr = args.lr
+        if args.standardize_y and args.lr >= 1e-3:
+            actual_lr = args.lr / 10.0
+            print(f"Notice: standardize_y is True. Reducing initial LR from {args.lr} to {actual_lr} to prevent plateau/instability.")
+            
+        optimizer = optim.Adam(model.parameters(), lr=actual_lr)
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode='min', factor=args.factor, patience=5
+            optimizer, mode='min', factor=args.factor, patience=5, threshold=1e-4
         )
         
         # トレーナーの初期化と学習実行
