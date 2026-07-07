@@ -123,9 +123,9 @@ def main():
         fold_dir = os.path.join(args.data_dir, f'fold{fold}')
         
         # DataLoaderの構築
-        train_dataset = GaitDataset(os.path.join(fold_dir, 'train.pkl'), args.input_type, args.target_type)
-        val_dataset = GaitDataset(os.path.join(fold_dir, 'val.pkl'), args.input_type, args.target_type)
-        test_dataset = GaitDataset(os.path.join(fold_dir, 'test.pkl'), args.input_type, args.target_type)
+        train_dataset = GaitDataset(os.path.join(fold_dir, 'train.pkl'), args.input_type, args.target_type, args.stride_type_X, args.stride_type_Y)
+        val_dataset = GaitDataset(os.path.join(fold_dir, 'val.pkl'), args.input_type, args.target_type, args.stride_type_X, args.stride_type_Y)
+        test_dataset = GaitDataset(os.path.join(fold_dir, 'test.pkl'), args.input_type, args.target_type, args.stride_type_X, args.stride_type_Y)
         
         y_mean_np = None
         y_std_np = None

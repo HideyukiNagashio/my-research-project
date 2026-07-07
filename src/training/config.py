@@ -15,6 +15,8 @@ def get_args_parser():
     parser.add_argument('--target_type', type=str, default='all', 
                         choices=['all', 'angles_only', 'angles_6dof', 'angles_3dof', 'grf_only'],
                         help='Target feature selection')
+    parser.add_argument('--stride_type_X', type=str, default='1.0_post_swing', help='Input stride pattern')
+    parser.add_argument('--stride_type_Y', type=str, default='1.0_post_swing', help='Target stride pattern')
     
     # --- Model Settings ---
     parser.add_argument('--model_type', type=str, default='cnn', 
