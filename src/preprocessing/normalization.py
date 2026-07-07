@@ -38,7 +38,7 @@ def compute_global_stats(train_results, stats_path=None):
 
     all_p, all_i = [], []
     for r in train_results:
-        ens = r['ensemble']
+        ens = r['ensemble_dict']['X_1.0_post_swing']
         if ens.shape[0] == 0:
             continue
         p_combined = ens[:, :, p_idx + cp_idx].reshape(-1, len(p_idx) + len(cp_idx))

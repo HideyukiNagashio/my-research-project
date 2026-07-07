@@ -42,20 +42,56 @@ def _process_single(args):
 
         df_final = synchronize_merge_and_extract(df_l_off, df_r_off, df_angles, df_force_bw)
 
-        r_strides, r_dur = slice_strides(df_final, 'Right_Fz', 'Right')
-        l_strides, l_dur = slice_strides(df_final, 'Left_Fz',  'Left')
+        r_strides_dict, r_dur = slice_strides(df_final, 'Right_Fz', 'Right')
+        l_strides_dict, l_dur = slice_strides(df_final, 'Left_Fz',  'Left')
 
-        r_dfs, r_ens = normalize_strides_bilateral(r_strides, COLS_RIGHT, COLS_LEFT)
-        l_dfs, l_ens = normalize_strides_bilateral(l_strides, COLS_LEFT,  COLS_RIGHT)
+        r_ens_dict, r_dfs_dict = {}, {}
+        for k, v in r_strides_dict.items():
+            dfs, ens = normalize_strides_bilateral(v, COLS_RIGHT, COLS_LEFT)
+            r_dfs_dict[k] = dfs
+            r_ens_dict[k] = ens
 
-        r_ens, r_dfs, _, r_dur = filter_outlier_strides_mad(r_ens, r_dfs, r_dur)
-        l_ens, l_dfs, _, l_dur = filter_outlier_strides_mad(l_ens, l_dfs, l_dur)
+        l_ens_dict, l_dfs_dict = {}, {}
+        for k, v in l_strides_dict.items():
+            dfs, ens = normalize_strides_bilateral(v, COLS_LEFT, COLS_RIGHT)
+            l_dfs_dict[k] = dfs
+            l_ens_dict[k] = ens
 
-        merged_ens, merged_cols, merged_dur = merge_bilateral(l_ens, r_ens, l_dur, r_dur)
+        # Filter outliers based on X_1.0_post_swing and apply the same mask to all generated versions
+        r_ens_x10, r_dfs_x10, r_keep, r_dur_out = filter_outlier_strides_mad(r_ens_dict['X_1.0_post_swing'], r_dfs_dict['X_1.0_post_swing'], r_dur)
+        l_ens_x10, l_dfs_x10, l_keep, l_dur_out = filter_outlier_strides_mad(l_ens_dict['X_1.0_post_swing'], l_dfs_dict['X_1.0_post_swing'], l_dur)
 
-        print(f"✓ {participant}_{condition}: {merged_ens.shape[0]} strides (52ch bilateral)")
+        for k in r_ens_dict.keys():
+            if k == 'X_1.0_post_swing':
+                r_ens_dict[k] = r_ens_x10
+                r_dfs_dict[k] = r_dfs_x10
+            elif len(r_keep) > 0:
+                r_ens_dict[k] = r_ens_dict[k][r_keep]
+                r_dfs_dict[k] = [d for i, d in enumerate(r_dfs_dict[k]) if r_keep[i]]
+            else:
+                r_ens_dict[k] = r_ens_dict[k][:0]
+                r_dfs_dict[k] = []
+
+        for k in l_ens_dict.keys():
+            if k == 'X_1.0_post_swing':
+                l_ens_dict[k] = l_ens_x10
+                l_dfs_dict[k] = l_dfs_x10
+            elif len(l_keep) > 0:
+                l_ens_dict[k] = l_ens_dict[k][l_keep]
+                l_dfs_dict[k] = [d for i, d in enumerate(l_dfs_dict[k]) if l_keep[i]]
+            else:
+                l_ens_dict[k] = l_ens_dict[k][:0]
+                l_dfs_dict[k] = []
+
+        merged_ens_dict = {}
+        merged_cols, merged_dur = None, None
+        for k in r_ens_dict.keys():
+            merged_ens_k, merged_cols, merged_dur = merge_bilateral(l_ens_dict[k], r_ens_dict[k], l_dur_out, r_dur_out)
+            merged_ens_dict[k] = merged_ens_k
+
+        print(f"✓ {participant}_{condition}: {merged_ens_dict['X_1.0_post_swing'].shape[0]} strides (52ch bilateral)")
         return dict(participant=participant, condition=condition, mass=mass,
-                    ensemble=merged_ens, columns=merged_cols, durations=merged_dur)
+                    ensemble_dict=merged_ens_dict, columns=merged_cols, durations=merged_dur)
     except Exception as e:
         print(f"✗ {participant}_{condition}: {e}")
         traceback.print_exc()
@@ -79,10 +115,15 @@ def process_all_data_raw(output_dir='data/interim/raw_strides', n_workers=None):
 
     for r in all_results:
         path = os.path.join(output_dir, f"{r['participant']}_{r['condition']}_raw.npz")
-        np.savez(path,
-                 ensemble=r['ensemble'], columns=r['columns'],
-                 participant=r['participant'], condition=r['condition'],
-                 mass=r['mass'], durations=r['durations'])
+        save_kwargs = dict(
+            columns=r['columns'],
+            participant=r['participant'], condition=r['condition'],
+            mass=r['mass'], durations=r['durations']
+        )
+        for k, v in r['ensemble_dict'].items():
+            save_kwargs[f"ensemble_{k}"] = v
+            
+        np.savez(path, **save_kwargs)
     return all_results
 
 def save_normalized_dataset(all_results, stats, output_dir='data/processed/normalized'):
@@ -91,24 +132,31 @@ def save_normalized_dataset(all_results, stats, output_dir='data/processed/norma
     p_map    = {name: i for i, name in enumerate(unique_p)}
     c_map    = {'h': 0, 'm': 1, 'l': 2}
 
-    all_ens, all_ids, all_conds, all_durs = [], [], [], []
+    all_ids, all_conds, all_durs = [], [], []
+    all_ens_dict = {k: [] for k in all_results[0]['ensemble_dict'].keys()}
+    
     for r in all_results:
-        norm = apply_global_normalization(r['ensemble'], stats)
-        np.savez(os.path.join(output_dir, f"{r['participant']}_{r['condition']}_norm.npz"),
-                 ensemble=norm, columns=r['columns'],
-                 participant=r['participant'], condition=r['condition'],
-                 mass=r['mass'], durations=r['durations'])
-        n = norm.shape[0]
-        all_ens.append(norm)
+        save_kwargs = dict(
+            columns=r['columns'],
+            participant=r['participant'], condition=r['condition'],
+            mass=r['mass'], durations=r['durations']
+        )
+        
+        n = r['ensemble_dict']['X_1.0_post_swing'].shape[0]
+        for k, v in r['ensemble_dict'].items():
+            norm = apply_global_normalization(v, stats)
+            save_kwargs[f"ensemble_{k}"] = norm
+            all_ens_dict[k].append(norm)
+            
+        np.savez(os.path.join(output_dir, f"{r['participant']}_{r['condition']}_norm.npz"), **save_kwargs)
+        
         all_ids.append(np.full(n, p_map[r['participant']]))
         all_conds.append(np.full(n, c_map[r['condition']]))
         if r['durations'] is not None:
             all_durs.append(r['durations'])
 
-    combined = np.concatenate(all_ens, axis=0)
     combined_path = os.path.join(output_dir, 'all_data_combined.npz')
     save_kwargs = dict(
-        ensemble      = combined,
         subject_ids   = np.concatenate(all_ids,   axis=0),
         condition_ids = np.concatenate(all_conds, axis=0),
         columns       = all_results[0]['columns'],
@@ -116,12 +164,15 @@ def save_normalized_dataset(all_results, stats, output_dir='data/processed/norma
         condition_map = c_map,
         angle_scale   = ANGLE_SCALE,
     )
+    for k, v_list in all_ens_dict.items():
+        save_kwargs[f"ensemble_{k}"] = np.concatenate(v_list, axis=0)
+        
     if all_durs:
         save_kwargs['durations'] = np.concatenate(all_durs, axis=0)
     np.savez(combined_path, **save_kwargs)
 
     print(f"\n  保存: {combined_path}")
-    print(f"  ensemble shape: {combined.shape}  (N_strides, 200, 52)")
+    print(f"  ensemble shape: {save_kwargs['ensemble_X_1.0_post_swing'].shape}  (N_strides, 200, 52)")
 
 if __name__ == '__main__':
     import time
