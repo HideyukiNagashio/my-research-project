@@ -112,11 +112,17 @@ def load_cached_raw_data(data_dir: Path, apply_exclude: bool = True):
             print(f"  [EXCLUDE] Skipping: {participant}_{condition}")
             continue
             
+        ensemble_dict = {}
+        for k in data.files:
+            if k.startswith('ensemble_'):
+                key = k.replace('ensemble_', '')
+                ensemble_dict[key] = data[k]
+                
         all_results.append({
             'participant': participant,
             'condition': condition,
             'mass': float(data['mass']),
-            'ensemble': data['ensemble'],
+            'ensemble_dict': ensemble_dict,
             'columns': data['columns'].tolist(),
             'durations': durations
         })
@@ -131,27 +137,24 @@ def save_split_data(output_path: Path, results_list, stats, p_map, c_map):
         print(f"    [SKIP] Empty results list for {output_path.name}")
         return
         
-    all_ens, all_ids, all_conds, all_durs = [], [], [], []
+    all_ids, all_conds, all_durs = [], [], []
     columns = results_list[0]['columns']
+    all_ens_dict = {k: [] for k in results_list[0]['ensemble_dict'].keys()}
     
-    # tqdmで適用経過を表示したい場合は外して使えるが、ここは高速なので割愛
     for r in results_list:
-        # 正規化を適用 (apply_global_normalization を利用)
-        norm = apply_global_normalization(r['ensemble'], stats)
-        n = norm.shape[0]
+        n = r['ensemble_dict']['X_1.0_post_swing'].shape[0]
         
-        all_ens.append(norm)
+        for k, v in r['ensemble_dict'].items():
+            norm = apply_global_normalization(v, stats)
+            all_ens_dict[k].append(norm)
+            
         all_ids.append(np.full(n, p_map[r['participant']]))
         all_conds.append(np.full(n, c_map[r['condition']]))
         
         if r['durations'] is not None:
             all_durs.append(r['durations'])
             
-    # 全被験者のデータを1つに結合
-    combined = np.concatenate(all_ens, axis=0)
-    
     save_data = {
-        'ensemble': combined,
         'subject_ids': np.concatenate(all_ids, axis=0),
         'condition_ids': np.concatenate(all_conds, axis=0),
         'columns': columns,
@@ -159,6 +162,9 @@ def save_split_data(output_path: Path, results_list, stats, p_map, c_map):
         'condition_map': c_map,
         'angle_scale': ANGLE_SCALE
     }
+    
+    for k, v_list in all_ens_dict.items():
+        save_data[f"ensemble_{k}"] = np.concatenate(v_list, axis=0)
     
     if all_durs:
         save_data['durations'] = np.concatenate(all_durs, axis=0)
