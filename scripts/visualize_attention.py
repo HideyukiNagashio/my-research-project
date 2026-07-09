@@ -24,6 +24,7 @@ import torch
 # Add the project root to the python path to import src modules
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from src.models import get_model
+from scripts.plot_utils import get_gait_phase_ticks
 
 # Default gait phase ratio (in % of stride cycle)
 DEFAULT_GAIT_PHASES = {
@@ -349,7 +350,7 @@ def compute_global_vmax(attention_maps: list) -> float:
 # Visualization & Drawing Helpers
 # ==========================================
 
-def draw_gait_phase_elements(ax, n_bins: int, boundaries_pct: dict):
+def draw_gait_phase_elements(ax, n_bins: int, boundaries_pct: dict, start_pct: float, end_pct: float):
     """
     Draws horizontal/vertical dashed lines for gait phase boundaries on a heatmap axis.
     The boundaries are scaled dynamically to the current number of bins.
@@ -358,11 +359,13 @@ def draw_gait_phase_elements(ax, n_bins: int, boundaries_pct: dict):
         ax: matplotlib axis
         n_bins: number of spatial bins/pixels in the current heatmap (e.g. 200, 50, 25)
         boundaries_pct: dict mapping phase name -> (start_pct, end_pct)
+        start_pct: the start percentage of the axis (e.g., -60, 0)
+        end_pct: the end percentage of the axis (e.g., 60, 100)
     """
     ends_pct = sorted(list(set([end for _, end in boundaries_pct.values()])))
     for pct in ends_pct:
-        if 0.0 < pct < 100.0:
-            idx = pct * n_bins / 100.0
+        if start_pct < pct < end_pct:
+            idx = (pct - start_pct) / (end_pct - start_pct) * (n_bins - 1)
             # Vertical line (Query boundary)
             ax.axvline(idx, color='white', linestyle='--', alpha=0.5, linewidth=1.0)
             # Horizontal line (Key boundary)
@@ -370,7 +373,8 @@ def draw_gait_phase_elements(ax, n_bins: int, boundaries_pct: dict):
 
 
 def plot_single_heatmap(ax, matrix: np.ndarray, title: str, vmin: float = 0.0, vmax: float = None, 
-                        boundaries_pct: dict = None):
+                        boundaries_pct: dict = None, tick_indices: list = None, tick_labels: list = None,
+                        start_pct: float = 0.0, end_pct: float = 100.0):
     """
     Helper to plot a transposed heatmap (Query on X-axis, Key on Y-axis).
     Row represents Key, Column represents Query.
@@ -393,15 +397,17 @@ def plot_single_heatmap(ax, matrix: np.ndarray, title: str, vmin: float = 0.0, v
     ax.set_ylabel("Key (% Gait Cycle)", fontsize=10)
     ax.invert_yaxis()
     
-    ticks = [0.0, 0.25 * n_bins, 0.50 * n_bins, 0.75 * n_bins, 1.0 * n_bins]
-    labels = ['0', '25', '50', '75', '100']
-    ax.set_xticks(ticks)
-    ax.set_xticklabels(labels)
-    ax.set_yticks(ticks)
-    ax.set_yticklabels(labels)
+    if tick_indices is None:
+        tick_indices = [0.0, 0.25 * n_bins, 0.50 * n_bins, 0.75 * n_bins, 1.0 * n_bins]
+        tick_labels = ['0', '25', '50', '75', '100']
+        
+    ax.set_xticks(tick_indices)
+    ax.set_xticklabels(tick_labels)
+    ax.set_yticks(tick_indices)
+    ax.set_yticklabels(tick_labels)
     
     if boundaries_pct:
-        draw_gait_phase_elements(ax, n_bins, boundaries_pct)
+        draw_gait_phase_elements(ax, n_bins, boundaries_pct, start_pct, end_pct)
 
 
 # ==========================================
@@ -421,6 +427,8 @@ def load_data_and_model(exp_dir, fold, device):
         
     input_type = config.get("input_type", "single_leg")
     target_type = config.get("target_type", "grf_only")
+    stride_type_X = config.get("stride_type_X", "1.0_post_swing")
+    stride_type_Y = config.get("stride_type_Y", "1.0_post_swing")
     
     if input_type == 'single_leg': in_dim = 14
     elif input_type == 'bilateral': in_dim = 28
@@ -479,7 +487,7 @@ def load_data_and_model(exp_dir, fold, device):
         with open(target_path, "r") as f:
             target_names = json.load(f)
 
-    return model, inputs, preds, targets, meta_df, feature_names, target_names
+    return model, inputs, preds, targets, meta_df, feature_names, target_names, stride_type_X, stride_type_Y
 
 
 def main():
@@ -487,12 +495,16 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     # 1. Load configuration and dataset arrays
-    model, inputs, preds, targets, meta_df, feature_names, target_names = load_data_and_model(
+    model, inputs, preds, targets, meta_df, feature_names, target_names, stride_type_X, stride_type_Y = load_data_and_model(
         args.exp_dir, args.fold, device
     )
     
     # Sequence length configurations
     seq_len = inputs.shape[1]
+    
+    # Get dynamic gait cycle mapping for the input sequence (Self-Attention)
+    pct_array, tick_indices, tick_vals, tick_labels = get_gait_phase_ticks(stride_type_X, seq_len)
+    start_pct, end_pct = pct_array[0], pct_array[-1]
     
     # 2. Setup Gait Phase boundaries
     gait_phases = DEFAULT_GAIT_PHASES
@@ -589,7 +601,8 @@ def main():
             fig_l, ax_l = plt.subplots(figsize=(6, 5))
             plot_single_heatmap(
                 ax_l, l_avg, f"Layer {l_idx+1} Mean (Sample {s_idx})",
-                vmin=0.0, vmax=vmax, boundaries_pct=gait_phases
+                vmin=0.0, vmax=vmax, boundaries_pct=gait_phases,
+                tick_indices=tick_indices, tick_labels=tick_labels, start_pct=start_pct, end_pct=end_pct
             )
             fig_l.savefig(
                 os.path.join(output_base, "layerwise", f"layer{l_idx+1}_sample{s_idx}.png"),
@@ -607,7 +620,8 @@ def main():
                 fig_h, ax_h = plt.subplots(figsize=(6, 5))
                 plot_single_heatmap(
                     ax_h, h_map, f"Layer {l_idx+1} Head {h_idx} (Sample {s_idx})",
-                    vmin=0.0, vmax=vmax, boundaries_pct=gait_phases
+                    vmin=0.0, vmax=vmax, boundaries_pct=gait_phases,
+                    tick_indices=tick_indices, tick_labels=tick_labels, start_pct=start_pct, end_pct=end_pct
                 )
                 fig_h.savefig(
                     os.path.join(output_base, "headwise", f"layer{l_idx+1}_head{h_idx}_sample{s_idx}.png"),
@@ -629,7 +643,8 @@ def main():
         fig_r, ax_r = plt.subplots(figsize=(6, 5))
         plot_single_heatmap(
             ax_r, s_rollout, f"Attention Rollout (Sample {s_idx}, Head: {args.head_idx})",
-            vmin=0.0, vmax=vmax, boundaries_pct=gait_phases
+            vmin=0.0, vmax=vmax, boundaries_pct=gait_phases,
+            tick_indices=tick_indices, tick_labels=tick_labels, start_pct=start_pct, end_pct=end_pct
         )
         fig_r.savefig(
             os.path.join(output_base, "rollout", f"rollout_sample{s_idx}.png"),
@@ -640,7 +655,7 @@ def main():
         # Save Rollout Profile (Key-wise Profile only)
         transposed_rollout = s_rollout.T # (Key, Query)
         key_profile = np.mean(transposed_rollout, axis=1) # Mean over Query
-        gait_cycle_pct = np.linspace(0, 100, len(key_profile))
+        gait_cycle_pct = pct_array
 
         # ------------------------------------------
         # C. Phase-to-Phase Matrix Calculation (Rollout-based)
@@ -671,7 +686,7 @@ def main():
             dpi=300, bbox_inches='tight'
         )
         plt.close(fig_pm)
-        gait_cycle_pct = np.linspace(0, 100, len(key_profile))
+        gait_cycle_pct = pct_array
         
         fig_prof, ax_prof = plt.subplots(figsize=(10, 4))
         ax_prof.plot(gait_cycle_pct, key_profile, 'b-', linewidth=2.0, label="Key-wise Profile (Importance as Reference)")
@@ -692,10 +707,10 @@ def main():
         fig_l_prof, ax_l_prof = plt.subplots(figsize=(10, 4))
         colors = ["tab:blue", "tab:orange", "tab:green"]
         for l_idx in range(num_layers):
-            l_profile = np.mean(layer_averages[l_idx], axis=0) # Mean over Query
-            gait_cycle_pct_l = np.linspace(0, 100, len(l_profile))
-            ax_l_prof.plot(
-                gait_cycle_pct_l, l_profile,
+            mean_prof_l = np.mean(layer_averages[l_idx], axis=0) # Mean over Query
+            gait_cycle_pct_l = pct_array
+            
+            ax_l_prof.plot(gait_cycle_pct_l, mean_prof_l,
                 label=f"Layer {l_idx + 1}",
                 color=colors[l_idx % len(colors)],
                 linewidth=2.0
@@ -705,8 +720,9 @@ def main():
         ax_l_prof.set_ylabel("Key-wise Attention Mean", fontsize=10)
         ax_l_prof.grid(True, linestyle=":", alpha=0.6)
         ax_l_prof.legend(loc="upper right")
-        ax_l_prof.set_xlim(0, 100)
-        ax_l_prof.set_xticks([0, 25, 50, 75, 100])
+        ax_l_prof.set_xlim(start_pct, end_pct)
+        ax_l_prof.set_xticks(tick_vals)
+        ax_l_prof.set_xticklabels(tick_labels)
         fig_l_prof.savefig(
             os.path.join(output_base, "rollout", f"layer_attention_profile_sample{s_idx}.png"),
             dpi=300, bbox_inches='tight'
@@ -832,7 +848,7 @@ def main():
             
         mean_prof = np.mean(batch_key_profiles, axis=0)
         std_prof = np.std(batch_key_profiles, axis=0)
-        gait_cycle_pct = np.linspace(0, 100, len(mean_prof))
+        gait_cycle_pct = pct_array
         
         fig_prof, ax_prof = plt.subplots(figsize=(10, 4))
         ax_prof.plot(gait_cycle_pct, mean_prof, color="tab:blue", linewidth=2.0, label="Global Mean Rollout Profile")
@@ -848,8 +864,9 @@ def main():
         ax_prof.set_ylabel("Rollout Weight", fontsize=10)
         ax_prof.grid(True, linestyle=":", alpha=0.6)
         ax_prof.legend()
-        ax_prof.set_xlim(0, 100)
-        ax_prof.set_xticks([0, 25, 50, 75, 100])
+        ax_prof.set_xlim(start_pct, end_pct)
+        ax_prof.set_xticks(tick_vals)
+        ax_prof.set_xticklabels(tick_labels)
         fig_prof.savefig(
             os.path.join(output_base, "rollout", f"rollout_profile_aggregate{filter_suffix}.png"),
             dpi=300, bbox_inches='tight'
@@ -890,8 +907,9 @@ def main():
         ax_layers.set_ylabel("Key-wise Attention Mean", fontsize=10)
         ax_layers.grid(True, linestyle=":", alpha=0.6)
         ax_layers.legend(loc="upper right")
-        ax_layers.set_xlim(0, 100)
-        ax_layers.set_xticks([0, 25, 50, 75, 100])
+        ax_layers.set_xlim(start_pct, end_pct)
+        ax_layers.set_xticks(tick_vals)
+        ax_layers.set_xticklabels(tick_labels)
         fig_layers.savefig(
             os.path.join(output_base, "rollout", "layer_attention_profile_aggregate.png"),
             dpi=300, bbox_inches='tight'

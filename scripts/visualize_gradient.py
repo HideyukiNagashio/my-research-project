@@ -28,6 +28,7 @@ import time
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 try:
     from src.models import get_model
+from scripts.plot_utils import get_gait_phase_ticks
 except ImportError:
     # Fallback if executing outside the repository environment
     get_model = None
@@ -260,23 +261,21 @@ def compute_phase_smoothed_maps_slow(model, input_data, out_col):
 # Plotting Helpers
 # =====================================================================
 
-def plot_dynamics_map(dynamics_map, out_label, in_label, save_path=None, timers=None):
+def plot_dynamics_map(dynamics_map, out_label, in_label, x_tick_indices, x_tick_labels, y_tick_indices, y_tick_labels, x_stride_type, y_stride_type, save_path=None, timers=None):
     """Plots and saves the dynamics heatmap."""
     if timers is not None:
         t_plot_start = time.time()
         
     plt.figure(figsize=(10, 8))
     
-    # Generate labels for 0% to 100% of gait cycle (every 10% / 20 steps)
-    time_labels = ["" for _ in range(200)]
-    for i in range(0, 200, 20):
-        time_labels[i] = f"{int(i * 0.5)}%"
-    time_labels[-1] = "100%"
+    sns.heatmap(dynamics_map, cmap="rocket_r", cbar_kws={'label': 'Gradient Magnitude'})
     
-    sns.heatmap(dynamics_map, cmap="rocket_r", xticklabels=time_labels, yticklabels=time_labels, cbar_kws={'label': 'Gradient Magnitude'})
-    plt.title(f"Dynamics Map ({out_label} Output vs {in_label} Input)\nVertical: Input Time $y$, Horizontal: Output Time $x$")
-    plt.xlabel("Output Time $x$ (% of Gait Cycle)")
-    plt.ylabel("Input Time $y$ (% of Gait Cycle)")
+    plt.xticks(x_tick_indices, x_tick_labels)
+    plt.yticks(y_tick_indices, y_tick_labels)
+    
+    plt.title(f"Dynamics Map ({out_label} Output vs {in_label} Input)\nVertical: Input Time (X), Horizontal: Output Time (Y)")
+    plt.xlabel(f"Output Time $x$ (% of Gait Cycle: {y_stride_type})")
+    plt.ylabel(f"Input Time $y$ (% of Gait Cycle: {x_stride_type})")
     plt.gca().invert_yaxis()  # Keep 0 at bottom
     plt.tight_layout()
     
@@ -294,22 +293,19 @@ def plot_dynamics_map(dynamics_map, out_label, in_label, save_path=None, timers=
     plt.close()
 
 
-def plot_overall_average_map(mean_map, out_label, feature_names, save_path=None, timers=None):
+def plot_overall_average_map(mean_map, out_label, feature_names, tick_indices, tick_labels, x_stride_type, save_path=None, timers=None):
     """Plots and saves the overall average sensitivity heatmap."""
     if timers is not None:
         t_plot_start = time.time()
         
     plt.figure(figsize=(12, 6))
     
-    # Generate labels for 0% to 100% of gait cycle (every 10% / 20 steps)
-    time_labels = ["" for _ in range(200)]
-    for i in range(0, 200, 20):
-        time_labels[i] = f"{int(i * 0.5)}%"
-    time_labels[-1] = "100%"
+    sns.heatmap(mean_map, cmap="rocket_r", yticklabels=feature_names, cbar_kws={'label': 'Mean Gradient Magnitude'})
     
-    sns.heatmap(mean_map, cmap="rocket_r", xticklabels=time_labels, yticklabels=feature_names, cbar_kws={'label': 'Mean Gradient Magnitude'})
+    plt.xticks(tick_indices, tick_labels)
+    
     plt.title(f"Overall Average Sensitivity Map ({out_label} Output)\nVertical: Input Columns, Horizontal: Input Time $y$")
-    plt.xlabel("Input Time $y$ (% of Gait Cycle)")
+    plt.xlabel(f"Input Time $y$ (% of Gait Cycle: {x_stride_type})")
     plt.ylabel("Input Features")
     plt.tight_layout()
     
@@ -327,7 +323,7 @@ def plot_overall_average_map(mean_map, out_label, feature_names, save_path=None,
     plt.close()
 
 
-def plot_phase_smoothed_maps(phase_maps, out_label, feature_names, save_path=None, timers=None):
+def plot_phase_smoothed_maps(phase_maps, out_label, feature_names, tick_indices, tick_labels, x_stride_type, save_path=None, timers=None):
     """Plots and saves the 7 phase subplots in a single figure."""
     if timers is not None:
         t_plot_start = time.time()
@@ -340,28 +336,24 @@ def plot_phase_smoothed_maps(phase_maps, out_label, feature_names, save_path=Non
     if global_max <= 0:
         global_max = 1.0
         
-    # Generate labels for 0% to 100% of gait cycle (every 10% / 20 steps)
-    time_labels = ["" for _ in range(200)]
-    for i in range(0, 200, 20):
-        time_labels[i] = f"{int(i * 0.5)}%"
-    time_labels[-1] = "100%"
-    
     for i, phase_name in enumerate(phases):
         ax = axes[i]
         sns.heatmap(
             phase_maps[phase_name], 
             cmap="rocket_r", 
-            xticklabels=time_labels, 
             yticklabels=feature_names if i == 0 or i == 3 or i == 6 else False,
             vmin=0.0, 
             vmax=global_max, 
             ax=ax,
             cbar_kws={'label': 'Gradient'} if i == 3 else None
         )
+        ax.set_xticks(tick_indices)
+        ax.set_xticklabels(tick_labels)
+        
         ax.set_title(f"Phase: {phase_name} ({DEFAULT_GAIT_PHASES[phase_name][0]:.0f}% - {DEFAULT_GAIT_PHASES[phase_name][1]:.0f}%)")
         ax.set_ylabel("Input Features" if i == 0 or i == 3 or i == 6 else "")
         
-    plt.xlabel("Input Time $y$ (% of Gait Cycle)")
+    plt.xlabel(f"Input Time $y$ (% of Gait Cycle: {x_stride_type})")
     plt.suptitle(f"Phase-wise Smoothed Sensitivity Maps ({out_label} Output)\nVertical: Features, Horizontal: Input Time", y=0.99, fontsize=14)
     plt.tight_layout()
     
@@ -395,6 +387,8 @@ def load_data_and_model(exp_dir, fold, device):
     input_type = config.get("input_type", "bilateral")
     target_type = config.get("target_type", "all")
     model_type = config.get("model_type", "transformer")
+    stride_type_X = config.get("stride_type_X", "1.0_post_swing")
+    stride_type_Y = config.get("stride_type_Y", "1.0_post_swing")
     
     # Calculate input dimension
     if input_type == 'single_leg': in_dim = 14
@@ -476,7 +470,7 @@ def load_data_and_model(exp_dir, fold, device):
     else:
         target_names = [f"Output_Col_{i}" for i in range(out_dim)]
         
-    return model, inputs, feature_names, target_names, in_dim, out_dim
+    return model, inputs, feature_names, target_names, in_dim, out_dim, stride_type_X, stride_type_Y
 
 
 # =====================================================================
@@ -708,9 +702,13 @@ def main():
         print(f"========================================")
         
         # Load model and data
-        model, inputs, feature_names, target_names, in_dim, out_dim = load_data_and_model(
+        model, inputs, feature_names, target_names, in_dim, out_dim, stride_type_X, stride_type_Y = load_data_and_model(
             args.exp_dir, fold, device
         )
+        seq_len = inputs.shape[1]
+        
+        _, x_tick_indices, _, x_tick_labels = get_gait_phase_ticks(stride_type_Y, seq_len)
+        _, y_tick_indices, _, y_tick_labels = get_gait_phase_ticks(stride_type_X, seq_len)
         
         # Determine target output columns
         if args.out_col.lower() == "all":
@@ -742,8 +740,6 @@ def main():
         os.makedirs(os.path.join(fold_out_dir, "dynamics"), exist_ok=True)
         os.makedirs(os.path.join(fold_out_dir, "average"), exist_ok=True)
         os.makedirs(os.path.join(fold_out_dir, "phase"), exist_ok=True)
-        
-        seq_len = inputs.shape[1]
         
         phase_slices = get_phase_indices(seq_len)
         
@@ -795,7 +791,7 @@ def main():
                     "dynamics", 
                     f"dynamics_map_{out_label}_vs_{in_label}{sample_suffix}.png"
                 )
-                plot_dynamics_map(mean_dynamics, out_label, in_label, save_path, timers=timers_app1)
+                plot_dynamics_map(mean_dynamics, out_label, in_label, x_tick_indices, x_tick_labels, y_tick_indices, y_tick_labels, stride_type_X, stride_type_Y, save_path, timers=timers_app1)
             t_app1_total = time.time() - t_app1_start
             print(f"Approach 1 (Plotting & Saving) Time: {t_app1_total:.3f}s")
             print(f"  Plotting    : {timers_app1['Plotting']:.3f}s")
@@ -812,7 +808,7 @@ def main():
                 "average", 
                 f"overall_average_map_{out_label}{sample_suffix}.png"
             )
-            plot_overall_average_map(mean_average, out_label, feature_names, save_path, timers=timers_app2)
+            plot_overall_average_map(mean_average, out_label, feature_names, y_tick_indices, y_tick_labels, stride_type_X, save_path, timers=timers_app2)
             t_app2_total = time.time() - t_app2_start
             print(f"Completed Overall Average Map for Output {out_label}")
             print(f"Approach 2 (Plotting & Saving) Time: {t_app2_total:.3f}s")
@@ -836,7 +832,7 @@ def main():
                 "phase", 
                 f"phase_wise_smoothed_maps_{out_label}{sample_suffix}.png"
             )
-            plot_phase_smoothed_maps(mean_phase_maps, out_label, feature_names, save_path, timers=timers_app3)
+            plot_phase_smoothed_maps(mean_phase_maps, out_label, feature_names, y_tick_indices, y_tick_labels, stride_type_X, save_path, timers=timers_app3)
             t_app3_total = time.time() - t_app3_start
             print(f"Completed Phase-wise Smoothed Maps for Output {out_label}")
             print(f"Approach 3 (Plotting & Saving) Time: {t_app3_total:.3f}s")
