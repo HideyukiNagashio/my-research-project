@@ -28,7 +28,7 @@ import time
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 try:
     from src.models import get_model
-from scripts.plot_utils import get_gait_phase_ticks
+    from scripts.plot_utils import get_gait_phase_ticks
 except ImportError:
     # Fallback if executing outside the repository environment
     get_model = None
