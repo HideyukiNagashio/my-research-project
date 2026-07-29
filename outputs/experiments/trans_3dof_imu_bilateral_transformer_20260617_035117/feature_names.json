@@ -1,0 +1,14 @@
+[
+    "AccX",
+    "AccY",
+    "AccZ",
+    "GyroX",
+    "GyroY",
+    "GyroZ",
+    "Contra_AccX",
+    "Contra_AccY",
+    "Contra_AccZ",
+    "Contra_GyroX",
+    "Contra_GyroY",
+    "Contra_GyroZ"
+]
