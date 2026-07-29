@@ -171,7 +171,7 @@ def main():
             model_kwargs.update({'hidden_dim': args.hidden_dim, 'kernel_size': args.kernel_size})
         elif args.model_type == 'bilstm':
             model_kwargs.update({'hidden_dim': args.hidden_dim, 'num_layers': args.num_layers})
-        elif args.model_type == 'transformer':
+        elif args.model_type in ['transformer', 'transformer_gelu']:
             model_kwargs.update({'d_model': args.d_model, 'nhead': args.nhead, 
                                  'num_layers': args.num_layers, 'dim_feedforward': args.dim_feedforward})
             

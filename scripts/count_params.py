@@ -134,7 +134,7 @@ def main():
             hidden_dim = config.get("hidden_dim", 256)
             num_layers = config.get("num_layers", 3)
             trainable, total = count_bilstm_params(in_dim, hidden_dim, num_layers, out_dim)
-        elif model_type == 'transformer':
+        elif model_type in ['transformer', 'transformer_gelu']:
             d_model = config.get("d_model", 128)
             nhead = config.get("nhead", 4)
             num_layers = config.get("num_layers", 3)
