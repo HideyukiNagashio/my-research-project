@@ -31,50 +31,39 @@ echo "=========================================================="
 echo " Starting Hybrid GRF (GNN + Transformer) Training Pipeline"
 echo "=========================================================="
 
-echo "Running Experiment 1: Input X = 1.0_pre_swing -> Output Y = 0.5..."
-$PYTHON_EXEC scripts/train_cv.py \
-    --exp_name "hybrid_grf_single" \
-    --data_dir "$DATA_DIR" \
-    --model_type "$MODEL" \
-    --input_type "$INPUT" \
-    --target_type "$TARGET" \
-    --stride_type_X "1.0_pre_swing" \
-    --stride_type_Y "$STRIDE_Y" \
-    --d_model $D_MODEL \
-    --nhead $NHEAD \
-    --dim_feedforward $FF_DIM \
-    --num_layers $LAYERS \
-    --dropout $DROPOUT \
-    --gnn_out_dim $GNN_OUT_DIM \
-    --cnn_pool_dim $CNN_POOL_DIM \
-    --epochs $EPOCHS \
-    --batch_size $BATCH \
-    --lr $LR \
-    --patience $PATIENCE \
-    --factor $FACTOR
+# 実行する入力パターン(X)と，それぞれに対応する実験名(exp_name)の配列
+INPUT_STRIDES=("0.5" "1.0_pre_swing" "1.0_post_swing" "1.5")
+EXP_NAMES=("hybrid_grf_single_0.5" "hybrid_grf_single_pre_swing" "hybrid_grf_single_post_swing" "hybrid_grf_single_1.5")
 
-# 実験2: Input X = 1.0_post_swing (if needed)
-echo "Running Experiment 2: Input X = 1.0_post_swing -> Output Y = 0.5..."
-$PYTHON_EXEC scripts/train_cv.py \
-    --exp_name "hybrid_grf_single_post_swing" \
-    --data_dir "$DATA_DIR" \
-    --model_type "$MODEL" \
-    --input_type "$INPUT" \
-    --target_type "$TARGET" \
-    --stride_type_X "1.0_post_swing" \
-    --stride_type_Y "$STRIDE_Y" \
-    --d_model $D_MODEL \
-    --nhead $NHEAD \
-    --dim_feedforward $FF_DIM \
-    --num_layers $LAYERS \
-    --dropout $DROPOUT \
-    --gnn_out_dim $GNN_OUT_DIM \
-    --cnn_pool_dim $CNN_POOL_DIM \
-    --epochs $EPOCHS \
-    --batch_size $BATCH \
-    --lr $LR \
-    --patience $PATIENCE \
-    --factor $FACTOR
+# 配列の要素数だけループ処理
+for i in "${!INPUT_STRIDES[@]}"; do
+    STRIDE_X="${INPUT_STRIDES[$i]}"
+    EXP_NAME="${EXP_NAMES[$i]}"
+
+    echo "Running Experiment $((i+1)): Input X = $STRIDE_X -> Output Y = $STRIDE_Y..."
+    $PYTHON_EXEC scripts/train_cv.py \
+        --exp_name "$EXP_NAME" \
+        --data_dir "$DATA_DIR" \
+        --model_type "$MODEL" \
+        --input_type "$INPUT" \
+        --target_type "$TARGET" \
+        --stride_type_X "$STRIDE_X" \
+        --stride_type_Y "$STRIDE_Y" \
+        --d_model $D_MODEL \
+        --nhead $NHEAD \
+        --dim_feedforward $FF_DIM \
+        --num_layers $LAYERS \
+        --dropout $DROPOUT \
+        --gnn_out_dim $GNN_OUT_DIM \
+        --cnn_pool_dim $CNN_POOL_DIM \
+        --epochs $EPOCHS \
+        --batch_size $BATCH \
+        --lr $LR \
+        --patience $PATIENCE \
+        --factor $FACTOR
+
+    echo "----------------------------------------------------------"
+done
 
 echo "=========================================================="
 echo " All Hybrid GRF experiments completed."
