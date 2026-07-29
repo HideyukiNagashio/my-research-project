@@ -83,24 +83,27 @@ def count_transformer_params(input_dim, d_model, nhead, num_layers, dim_feedforw
     trainable = emb_w + emb_b + encoder_params + fc1_w + fc1_b + fc2_w + fc2_b
     return trainable, trainable
 
-def count_hybrid_grf_params(input_dim, num_layers, dim_feedforward, output_dim, gnn_out_dim, cnn_pool_dim, seq_len=200):
+def count_hybrid_grf_params(input_dim, num_layers, dim_feedforward, output_dim, gnn_out_dim, cnn_pool_dim, d_model, seq_len=200):
     conv1 = 3 * gnn_out_dim + gnn_out_dim
     conv2 = gnn_out_dim * gnn_out_dim + gnn_out_dim
     pool = (8 * gnn_out_dim) * cnn_pool_dim + cnn_pool_dim
-    actual_d_model = cnn_pool_dim + (input_dim - 8)
-    pos_emb = 1 * seq_len * actual_d_model
     
-    attn_in_proj = 3 * actual_d_model * actual_d_model + 3 * actual_d_model
-    attn_out_proj = actual_d_model * actual_d_model + actual_d_model
-    ff_linear1 = dim_feedforward * actual_d_model + dim_feedforward
-    ff_linear2 = actual_d_model * dim_feedforward + actual_d_model
-    norm1 = 2 * actual_d_model
-    norm2 = 2 * actual_d_model
+    combined_dim = cnn_pool_dim + (input_dim - 8)
+    fc_proj = combined_dim * d_model + d_model
+    
+    pos_emb = 1 * seq_len * d_model
+    
+    attn_in_proj = 3 * d_model * d_model + 3 * d_model
+    attn_out_proj = d_model * d_model + d_model
+    ff_linear1 = dim_feedforward * d_model + dim_feedforward
+    ff_linear2 = d_model * dim_feedforward + d_model
+    norm1 = 2 * d_model
+    norm2 = 2 * d_model
     layer_params = attn_in_proj + attn_out_proj + ff_linear1 + ff_linear2 + norm1 + norm2
     encoder_params = layer_params * num_layers
     
-    fc_out = actual_d_model * output_dim + output_dim
-    trainable = conv1 + conv2 + pool + pos_emb + encoder_params + fc_out
+    fc_out = d_model * output_dim + output_dim
+    trainable = conv1 + conv2 + pool + fc_proj + pos_emb + encoder_params + fc_out
     return trainable, trainable
 
 def main():
@@ -165,7 +168,8 @@ def main():
             cnn_pool_dim = config.get("cnn_pool_dim", 32)
             num_layers = config.get("num_layers", 2)
             dim_feedforward = config.get("dim_feedforward", 128)
-            trainable, total = count_hybrid_grf_params(in_dim, num_layers, dim_feedforward, out_dim, gnn_out_dim, cnn_pool_dim)
+            d_model = config.get("d_model", 128)
+            trainable, total = count_hybrid_grf_params(in_dim, num_layers, dim_feedforward, out_dim, gnn_out_dim, cnn_pool_dim, d_model)
         else:
             continue
             

@@ -67,13 +67,12 @@ class HybridGRFModel(nn.Module):
     """
     def __init__(self, input_dim=14, output_dim=3, use_shortcut=False, seq_len=200, 
                  gnn_out_dim=16, cnn_pool_dim=32, 
-                 d_model=38, nhead=2, num_layers=2, dim_feedforward=128, dropout_prob=0.1):
+                 d_model=128, nhead=4, num_layers=3, dim_feedforward=256, dropout_prob=0.1):
         super(HybridGRFModel, self).__init__()
         
         # d_model corresponds to the dimension input to the transformer.
-        # It must be cnn_pool_dim + (input_dim - 8). Usually input_dim is 14, meaning 8 pressure + 6 IMU.
         imu_dim = input_dim - 8
-        d_model_actual = cnn_pool_dim + imu_dim
+        combined_dim = cnn_pool_dim + imu_dim
         
         # グラフ構造の初期化 (register_bufferでGPUデバイス転送に対応)
         norm_coords, edge_index, edge_weight = create_graph_structure(use_shortcut)
@@ -90,13 +89,16 @@ class HybridGRFModel(nn.Module):
         # 8ノード分の特徴をFlattenし、全結合層で圧縮
         self.fc_pool = nn.Linear(8 * gnn_out_dim, cnn_pool_dim)
         
+        # 5. 特徴量の次元をTransformerのd_modelに揃えるための射影層
+        self.fc_proj = nn.Linear(combined_dim, d_model)
+        
         # --- 6. Transformer層 ---
         # 位置エンコーディング (時系列情報を付与)
-        self.pos_embedding = nn.Parameter(torch.randn(1, seq_len, d_model_actual))
+        self.pos_embedding = nn.Parameter(torch.randn(1, seq_len, d_model))
         
         # Transformer (バッチファースト)
         encoder_layer = nn.TransformerEncoderLayer(
-            d_model=d_model_actual, 
+            d_model=d_model, 
             nhead=nhead, 
             dim_feedforward=dim_feedforward, 
             dropout=dropout_prob,
@@ -106,7 +108,7 @@ class HybridGRFModel(nn.Module):
         
         # --- 7. 出力層 ---
         # 3軸の床反力 (Fx, Fy, Fz)
-        self.fc_out = nn.Linear(d_model_actual, output_dim)
+        self.fc_out = nn.Linear(d_model, output_dim)
 
     def forward(self, x):
         """
@@ -155,13 +157,16 @@ class HybridGRFModel(nn.Module):
         pooled = pooled.reshape(batch_size, seq_len, -1)
         
         # 5. 結合
-        # GNN特徴(32)とIMU特徴(6)を結合: (Batch, 200, 38)
+        # GNN特徴(cnn_pool_dim)とIMU特徴(6)を結合
         combined = torch.cat([pooled, imu], dim=2) 
+        
+        # 射影: combined_dim -> d_model
+        combined_proj = self.fc_proj(combined)
         
         # 6. Transformer層 (時間特徴抽出)
         # 位置エンコーディングを加算
-        combined = combined + self.pos_embedding
-        transformer_out = self.transformer(combined) # (Batch, 200, 38)
+        combined_proj = combined_proj + self.pos_embedding
+        transformer_out = self.transformer(combined_proj) # (Batch, 200, d_model)
         
         # 7. 出力層
         # (Batch, 200, 3) -> 時系列各ステップでの(Fx, Fy, Fz)
