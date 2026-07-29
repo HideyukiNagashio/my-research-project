@@ -1,0 +1,170 @@
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import numpy as np
+from torch_geometric.nn import GCNConv
+
+def create_graph_structure(use_shortcut=False):
+    """
+    1. センサーの座標からedge_indexとedge_weightを生成する関数
+    """
+    # センサー座標 (x, y) ※0-indexedで管理
+    coords = np.array([
+        [27, 218], # 0: センサ1 (母指)
+        [23, 183], # 1: センサ2 (第一中足骨頭)
+        [46, 182], # 2: センサ3 (第三中足骨頭)
+        [74, 176], # 3: センサ4 (第四中足骨頭)
+        [74, 111], # 4: センサ5 (外側アーチ)
+        [64,  52], # 5: センサ6 (外側踵)
+        [38,  44], # 6: センサ7 (内側踵)
+        [50,  19]  # 7: センサ8 (中央踵)
+    ], dtype=np.float32)
+
+    # 座標の正規化 (0〜1)
+    coords_min = coords.min(axis=0)
+    coords_max = coords.max(axis=0)
+    norm_coords = (coords - coords_min) / (coords_max - coords_min)
+    norm_coords = torch.tensor(norm_coords, dtype=torch.float32)
+
+    # 基本エッジ (1-indexedの要件を0-indexedに変換)
+    base_edges = [
+        (0, 1), (1, 2), (2, 3), (5, 6), (6, 7), (3, 4), (4, 5), (1, 6)
+    ]
+    
+    # ショートカットエッジ (アブレーション用)
+    shortcut_edges = [
+        (1, 3), (0, 6), (3, 5)
+    ]
+    
+    edges = base_edges.copy()
+    if use_shortcut:
+        edges.extend(shortcut_edges)
+        
+    # 無向グラフにするため双方向にエッジを張る
+    bidirectional_edges = []
+    for u, v in edges:
+        bidirectional_edges.append((u, v))
+        bidirectional_edges.append((v, u))
+        
+    # edge_index の作成: 形状は (2, Num_Edges)
+    edge_index = torch.tensor(bidirectional_edges, dtype=torch.long).t().contiguous()
+    
+    # エッジの重みをユークリッド距離の逆数として計算
+    edge_weight = []
+    for u, v in bidirectional_edges:
+        dist = np.linalg.norm(coords[u] - coords[v])
+        weight = 1.0 / (dist + 1e-6) # ゼロ割り算防止
+        edge_weight.append(weight)
+        
+    edge_weight = torch.tensor(edge_weight, dtype=torch.float32)
+    
+    return norm_coords, edge_index, edge_weight
+
+
+class HybridGRFModel(nn.Module):
+    """
+    2. GNN + Transformerのハイブリッドモデル
+    """
+    def __init__(self, input_dim=14, output_dim=3, use_shortcut=False, seq_len=200, 
+                 gnn_out_dim=16, cnn_pool_dim=32, 
+                 d_model=38, nhead=2, num_layers=2, dim_feedforward=128, dropout_prob=0.1):
+        super(HybridGRFModel, self).__init__()
+        
+        # d_model corresponds to the dimension input to the transformer.
+        # It must be cnn_pool_dim + (input_dim - 8). Usually input_dim is 14, meaning 8 pressure + 6 IMU.
+        imu_dim = input_dim - 8
+        d_model_actual = cnn_pool_dim + imu_dim
+        
+        # グラフ構造の初期化 (register_bufferでGPUデバイス転送に対応)
+        norm_coords, edge_index, edge_weight = create_graph_structure(use_shortcut)
+        self.register_buffer('norm_coords', norm_coords)
+        self.register_buffer('edge_index', edge_index)
+        self.register_buffer('edge_weight', edge_weight)
+        
+        # --- 3. GNN層 ---
+        # 入力ノード特徴量: [圧力値(1), x(1), y(1)] = 3次元
+        self.conv1 = GCNConv(3, gnn_out_dim)
+        self.conv2 = GCNConv(gnn_out_dim, gnn_out_dim)
+        
+        # --- 4. プーリング層 ---
+        # 8ノード分の特徴をFlattenし、全結合層で圧縮
+        self.fc_pool = nn.Linear(8 * gnn_out_dim, cnn_pool_dim)
+        
+        # --- 6. Transformer層 ---
+        # 位置エンコーディング (時系列情報を付与)
+        self.pos_embedding = nn.Parameter(torch.randn(1, seq_len, d_model_actual))
+        
+        # Transformer (バッチファースト)
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model_actual, 
+            nhead=nhead, 
+            dim_feedforward=dim_feedforward, 
+            dropout=dropout_prob,
+            batch_first=True
+        )
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        
+        # --- 7. 出力層 ---
+        # 3軸の床反力 (Fx, Fy, Fz)
+        self.fc_out = nn.Linear(d_model_actual, output_dim)
+
+    def forward(self, x):
+        """
+        入力: x の形状は (Batch, 200, 14)
+        """
+        batch_size, seq_len, num_features = x.size()
+        
+        # 1. データ分離
+        pressure = x[:, :, :8] # (Batch, 200, 8)
+        imu = x[:, :, 8:]      # (Batch, 200, 6)
+        
+        # 2. ノード特徴量作成
+        # 圧力をノード特徴量にするため変形: (Batch * 200, 8, 1)
+        p_reshaped = pressure.reshape(batch_size * seq_len, 8, 1)
+        
+        # 座標をバッチ＆時系列分に拡張: (Batch * 200, 8, 2)
+        coords_expanded = self.norm_coords.unsqueeze(0).expand(batch_size * seq_len, 8, 2)
+        
+        # 結合してノード特徴量を作成: (Batch * 200, 8, 3)  ※[圧力, x, y]
+        node_features = torch.cat([p_reshaped, coords_expanded], dim=2)
+        
+        # PyGに渡すためノード次元でFlatten: (Batch * 200 * 8, 3)
+        node_features = node_features.reshape(batch_size * seq_len * 8, 3)
+        
+        # --- GNN用のバッチエッジ生成 ---
+        # 全タイムステップ・全バッチのグラフを1つの大きな非連結グラフとして計算するためのオフセット処理
+        num_graphs = batch_size * seq_len
+        offset = torch.arange(0, num_graphs * 8, 8, device=x.device).view(-1, 1, 1)
+        
+        batched_edge_index = self.edge_index.unsqueeze(0).expand(num_graphs, 2, -1)
+        batched_edge_index = (batched_edge_index + offset).transpose(0, 1).reshape(2, -1) # (2, num_graphs * E)
+        batched_edge_weight = self.edge_weight.unsqueeze(0).expand(num_graphs, -1).reshape(-1)
+        
+        # 3. GNN層 (空間特徴抽出)
+        g_out = F.relu(self.conv1(node_features, batched_edge_index, batched_edge_weight))
+        g_out = F.relu(self.conv2(g_out, batched_edge_index, batched_edge_weight)) # (Batch*200*8, 16)
+        
+        # 4. プーリング
+        # Flatten: (Batch * 200, 8 * 16)
+        g_out = g_out.reshape(batch_size * seq_len, 8 * self.conv2.out_channels)
+        
+        # 圧縮: (Batch * 200, 32)
+        pooled = F.relu(self.fc_pool(g_out))
+        
+        # 形状を元の系列に戻す: (Batch, 200, 32)
+        pooled = pooled.reshape(batch_size, seq_len, -1)
+        
+        # 5. 結合
+        # GNN特徴(32)とIMU特徴(6)を結合: (Batch, 200, 38)
+        combined = torch.cat([pooled, imu], dim=2) 
+        
+        # 6. Transformer層 (時間特徴抽出)
+        # 位置エンコーディングを加算
+        combined = combined + self.pos_embedding
+        transformer_out = self.transformer(combined) # (Batch, 200, 38)
+        
+        # 7. 出力層
+        # (Batch, 200, 3) -> 時系列各ステップでの(Fx, Fy, Fz)
+        out = self.fc_out(transformer_out) 
+        
+        return out

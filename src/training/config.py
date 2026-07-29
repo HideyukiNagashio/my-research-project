@@ -20,7 +20,7 @@ def get_args_parser():
     
     # --- Model Settings ---
     parser.add_argument('--model_type', type=str, default='cnn', 
-                        choices=['cnn', 'bilstm', 'transformer', 'transformer_gelu'],
+                        choices=['cnn', 'bilstm', 'transformer', 'transformer_gelu', 'hybrid_grf'],
                         help='Model architecture to use')
     # Transformer ones
     parser.add_argument('--d_model', type=int, default=128, help='Transformer embedding dim')
@@ -31,6 +31,10 @@ def get_args_parser():
     parser.add_argument('--kernel_size', type=int, default=5, help='Kernel size for CNN')
     parser.add_argument('--num_layers', type=int, default=3, help='Num layers for Transformer/LSTM')
     parser.add_argument('--dropout', type=float, default=0.3, help='Dropout probability')
+    # Hybrid GRF (GNN) ones
+    parser.add_argument('--use_shortcut', action='store_true', help='Use shortcut edges in GNN')
+    parser.add_argument('--gnn_out_dim', type=int, default=16, help='GNN hidden dimension')
+    parser.add_argument('--cnn_pool_dim', type=int, default=32, help='Pooled dimension from GNN nodes')
     
     # --- Training Settings ---
     parser.add_argument('--epochs', type=int, default=200, help='Max number of epochs to train')

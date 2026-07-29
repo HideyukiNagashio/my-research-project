@@ -2,6 +2,7 @@ from .cnn import TimeSeriesCNNRegression
 from .bilstm import AdvancedBiLSTMRegression
 from .transformer import TimeSeriesTransformer
 from .transformer_GeLU import TimeSeriesTransformer as TimeSeriesTransformerGeLU
+from .hybrid_grf import HybridGRFModel
 
 def get_model(model_name: str, **kwargs):
     """
@@ -16,6 +17,8 @@ def get_model(model_name: str, **kwargs):
         return TimeSeriesTransformer(**kwargs)
     elif model_name == 'transformer_gelu':
         return TimeSeriesTransformerGeLU(**kwargs)
+    elif model_name == 'hybrid_grf':
+        return HybridGRFModel(**kwargs)
     else:
-        raise ValueError(f"Unknown model name: {model_name}. Supported models are: cnn, bilstm, transformer, transformer_gelu.")
+        raise ValueError(f"Unknown model name: {model_name}. Supported models are: cnn, bilstm, transformer, transformer_gelu, hybrid_grf.")
 
