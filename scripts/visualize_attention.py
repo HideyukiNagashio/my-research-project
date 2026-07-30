@@ -282,48 +282,46 @@ def calculate_attention_rollout(attention_maps: list, head_idx: str = "mean") ->
 def get_phase_boundaries(gait_phases: dict, seq_len: int, start_pct: float = 0.0, end_pct: float = 100.0) -> dict:
     """
     Maps percentage boundaries to step boundary coordinates dynamically based on sequence bounds.
+    Skips phases that fall completely outside the sequence boundaries.
     """
     boundaries = {}
     for name, (p_start, p_end) in gait_phases.items():
-        idx_start = (p_start - start_pct) / (end_pct - start_pct) * (seq_len - 1)
-        idx_end = (p_end - start_pct) / (end_pct - start_pct) * (seq_len - 1)
+        if p_end <= start_pct or p_start >= end_pct:
+            continue
+            
+        clamped_start = max(p_start, start_pct)
+        clamped_end = min(p_end, end_pct)
+        
+        idx_start = (clamped_start - start_pct) / (end_pct - start_pct) * (seq_len - 1)
+        idx_end = (clamped_end - start_pct) / (end_pct - start_pct) * (seq_len - 1)
         boundaries[name] = (idx_start, idx_end)
     return boundaries
 
 
-def calculate_phase_matrix(A: np.ndarray, seq_len: int, boundaries_q: dict, boundaries_k: dict) -> np.ndarray:
+def calculate_phase_matrix(A: np.ndarray, seq_len: int, boundaries_q: dict, boundaries_k: dict) -> tuple:
     """
-    Computes a compressed (N_phase, N_phase) average attention matrix.
-    
-    Args:
-        A: Attention map of shape (SeqLen, SeqLen) (Query, Key)
-        seq_len: sequence length (e.g. 200)
-        boundaries_q: dict containing phase_name -> (start_step, end_step) for Query (Output)
-        boundaries_k: dict containing phase_name -> (start_step, end_step) for Key (Input)
-        
-    Returns:
-        matrix: shape (N_phase, N_phase) where row=Key phase, col=Query phase.
+    Computes a compressed average attention matrix for varying input/output phases.
     """
-    phase_names = list(boundaries_q.keys())
-    num_phases = len(phase_names)
-    matrix = np.zeros((num_phases, num_phases))
+    phase_names_q = list(boundaries_q.keys())
+    phase_names_k = list(boundaries_k.keys())
     
-    for j, q_name in enumerate(phase_names):
+    matrix = np.zeros((len(phase_names_k), len(phase_names_q)))
+    
+    for j, q_name in enumerate(phase_names_q):
         q_start, q_end = boundaries_q[q_name]
         q_indices = np.arange(int(round(q_start)), int(round(q_end)))
         q_indices = q_indices[(q_indices >= 0) & (q_indices < seq_len)]
         
-        for i, k_name in enumerate(phase_names):
+        for i, k_name in enumerate(phase_names_k):
             k_start, k_end = boundaries_k[k_name]
             k_indices = np.arange(int(round(k_start)), int(round(k_end)))
             k_indices = k_indices[(k_indices >= 0) & (k_indices < seq_len)]
             
             if len(q_indices) > 0 and len(k_indices) > 0:
-                # Slicing the (Query, Key) sub-block and computing the mean.
                 sub_matrix = A[np.ix_(q_indices, k_indices)]
                 matrix[i, j] = np.mean(sub_matrix)
                 
-    return matrix
+    return matrix, phase_names_q, phase_names_k
 
 
 
@@ -660,11 +658,10 @@ def main():
         # ------------------------------------------
         # C. Phase-to-Phase Matrix Calculation (Rollout-based)
         # ------------------------------------------
-        p_matrix = calculate_phase_matrix(s_rollout_raw, seq_len, boundaries_q=boundaries_out, boundaries_k=boundaries_in)
+        p_matrix, phase_names_q, phase_names_k = calculate_phase_matrix(s_rollout_raw, seq_len, boundaries_q=boundaries_out, boundaries_k=boundaries_in)
         
         # Save Phase Matrix heatmap (using phase names as labels)
         fig_pm, ax_pm = plt.subplots(figsize=(7, 6))
-        phase_names = list(boundaries.keys())
         sns.heatmap(
             p_matrix, 
             cmap="viridis", 
@@ -672,14 +669,14 @@ def main():
             fmt=".4f", 
             ax=ax_pm, 
             square=True,
-            xticklabels=phase_names,
-            yticklabels=phase_names
+            xticklabels=phase_names_q,
+            yticklabels=phase_names_k
         )
         ax_pm.set_title(f"Phase-to-Phase Attention Matrix (Sample {s_idx})", fontsize=12, fontweight='bold')
-        ax_pm.set_xlabel("Query (Current Phase)", fontsize=10)
-        ax_pm.set_ylabel("Key (Attended Phase)", fontsize=10)
-        ax_pm.set_xticklabels(phase_names, rotation=45)
-        ax_pm.set_yticklabels(phase_names, rotation=0)
+        ax_pm.set_xlabel("Query (Current Phase / Output)", fontsize=10)
+        ax_pm.set_ylabel("Key (Attended Phase / Input)", fontsize=10)
+        ax_pm.set_xticklabels(phase_names_q, rotation=45)
+        ax_pm.set_yticklabels(phase_names_k, rotation=0)
         ax_pm.invert_yaxis()
         fig_pm.savefig(
             os.path.join(output_base, "phase_matrix", f"phase_matrix_sample{s_idx}.png"),
@@ -827,7 +824,7 @@ def main():
         p_matrix_agg = calculate_phase_matrix(agg_rollout_raw, seq_len, boundaries_q=boundaries_out, boundaries_k=boundaries_in)
         
         fig_pm, ax_pm = plt.subplots(figsize=(7, 6))
-        phase_names = list(boundaries.keys())
+        phase_names = list(boundaries_in.keys())
         sns.heatmap(
             p_matrix_agg, 
             cmap="viridis", 
@@ -937,6 +934,8 @@ def main():
             plt.show()
         except Exception:
             print("No graphic display detected or backend not available. Plots were saved to file.")
+            
+    print(f"\n✅ All attention visualization tasks completed! Plots saved to: {output_base}")
 
 
 if __name__ == "__main__":
