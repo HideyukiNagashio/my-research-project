@@ -1,8 +1,5 @@
 #!/bin/bash
 
-# PYTHONPATHにプロジェクトのルートを追加
-export PYTHONPATH="$(pwd):$PYTHONPATH"
-
 # Configuration settings matching the transformer_grf_single configuration
 DATA_DIR="data/processed/cv"
 MODEL="hybrid_grf"
@@ -28,8 +25,7 @@ PATIENCE=20
 FACTOR=0.5
 STRIDE_Y="0.5" # From previous experiments
 
-# 仮想環境のPythonを使用するパスを設定
-PYTHON_EXEC="env/bin/python"
+PYTHON_EXEC="python"
 
 echo "=========================================================="
 echo " Starting Hybrid GRF (GNN + Transformer) Training Pipeline"
