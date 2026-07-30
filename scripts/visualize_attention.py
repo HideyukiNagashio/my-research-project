@@ -24,18 +24,7 @@ import torch
 # Add the project root to the python path to import src modules
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from src.models import get_model
-from scripts.plot_utils import get_gait_phase_ticks
-
-# Default gait phase ratio (in % of stride cycle)
-DEFAULT_GAIT_PHASES = {
-    'LR':  (0.0, 10.0),   # Loading Response
-    'MSt': (10.0, 30.0),  # Mid Stance
-    'TSt': (30.0, 50.0),  # Terminal Stance
-    'PSw': (50.0, 60.0),  # Pre Swing
-    'ISw': (60.0, 75.0),  # Initial Swing
-    'MSw': (75.0, 85.0),  # Mid Swing
-    'TSw': (85.0, 100.0)  # Terminal Swing
-}
+from scripts.plot_utils import get_gait_phase_ticks, DEFAULT_GAIT_PHASES
 
 
 def parse_args():
@@ -252,7 +241,7 @@ def temporal_binning(A: np.ndarray, bins: int) -> np.ndarray:
 def calculate_attention_rollout(attention_maps: list, head_idx: str = "mean") -> np.ndarray:
     """
     Computes cumulative Attention Rollout considering residual connections and layer product.
-    R_l = \hat{A}_l @ R_{l-1}, where \hat{A}_l = A_l + I (normalized).
+    R_l = \\hat{A}_l @ R_{l-1}, where \\hat{A}_l = A_l + I (normalized).
     
     Args:
         attention_maps: List of length num_layers. Each item is shape (Batch, nhead, SeqLen, SeqLen).
@@ -290,39 +279,42 @@ def calculate_attention_rollout(attention_maps: list, head_idx: str = "mean") ->
     return R
 
 
-def get_phase_boundaries(gait_phases: dict, seq_len: int) -> dict:
+def get_phase_boundaries(gait_phases: dict, seq_len: int, start_pct: float = 0.0, end_pct: float = 100.0) -> dict:
     """
-    Maps percentage boundaries to step boundary coordinates.
+    Maps percentage boundaries to step boundary coordinates dynamically based on sequence bounds.
     """
     boundaries = {}
-    for name, (start_pct, end_pct) in gait_phases.items():
-        boundaries[name] = (start_pct * seq_len / 100.0, end_pct * seq_len / 100.0)
+    for name, (p_start, p_end) in gait_phases.items():
+        idx_start = (p_start - start_pct) / (end_pct - start_pct) * (seq_len - 1)
+        idx_end = (p_end - start_pct) / (end_pct - start_pct) * (seq_len - 1)
+        boundaries[name] = (idx_start, idx_end)
     return boundaries
 
 
-def calculate_phase_matrix(A: np.ndarray, seq_len: int, boundaries: dict) -> np.ndarray:
+def calculate_phase_matrix(A: np.ndarray, seq_len: int, boundaries_q: dict, boundaries_k: dict) -> np.ndarray:
     """
     Computes a compressed (N_phase, N_phase) average attention matrix.
     
     Args:
         A: Attention map of shape (SeqLen, SeqLen) (Query, Key)
         seq_len: sequence length (e.g. 200)
-        boundaries: dict containing phase_name -> (start_step, end_step)
+        boundaries_q: dict containing phase_name -> (start_step, end_step) for Query (Output)
+        boundaries_k: dict containing phase_name -> (start_step, end_step) for Key (Input)
         
     Returns:
         matrix: shape (N_phase, N_phase) where row=Key phase, col=Query phase.
     """
-    phase_names = list(boundaries.keys())
+    phase_names = list(boundaries_q.keys())
     num_phases = len(phase_names)
     matrix = np.zeros((num_phases, num_phases))
     
     for j, q_name in enumerate(phase_names):
-        q_start, q_end = boundaries[q_name]
+        q_start, q_end = boundaries_q[q_name]
         q_indices = np.arange(int(round(q_start)), int(round(q_end)))
         q_indices = q_indices[(q_indices >= 0) & (q_indices < seq_len)]
         
         for i, k_name in enumerate(phase_names):
-            k_start, k_end = boundaries[k_name]
+            k_start, k_end = boundaries_k[k_name]
             k_indices = np.arange(int(round(k_start)), int(round(k_end)))
             k_indices = k_indices[(k_indices >= 0) & (k_indices < seq_len)]
             
@@ -350,31 +342,29 @@ def compute_global_vmax(attention_maps: list) -> float:
 # Visualization & Drawing Helpers
 # ==========================================
 
-def draw_gait_phase_elements(ax, n_bins: int, boundaries_pct: dict, start_pct: float, end_pct: float):
+def draw_gait_phase_elements(ax, n_bins: int, boundaries_pct: dict, start_pct_x: float, end_pct_x: float, start_pct_y: float, end_pct_y: float):
     """
     Draws horizontal/vertical dashed lines for gait phase boundaries on a heatmap axis.
     The boundaries are scaled dynamically to the current number of bins.
-    
-    Args:
-        ax: matplotlib axis
-        n_bins: number of spatial bins/pixels in the current heatmap (e.g. 200, 50, 25)
-        boundaries_pct: dict mapping phase name -> (start_pct, end_pct)
-        start_pct: the start percentage of the axis (e.g., -60, 0)
-        end_pct: the end percentage of the axis (e.g., 60, 100)
     """
     ends_pct = sorted(list(set([end for _, end in boundaries_pct.values()])))
     for pct in ends_pct:
-        if start_pct < pct < end_pct:
-            idx = (pct - start_pct) / (end_pct - start_pct) * (n_bins - 1)
-            # Vertical line (Query boundary)
-            ax.axvline(idx, color='white', linestyle='--', alpha=0.5, linewidth=1.0)
-            # Horizontal line (Key boundary)
-            ax.axhline(idx, color='white', linestyle='--', alpha=0.5, linewidth=1.0)
+        if start_pct_x < pct < end_pct_x:
+            idx_x = (pct - start_pct_x) / (end_pct_x - start_pct_x) * (n_bins - 1)
+            # Vertical line (Query boundary, X-axis)
+            ax.axvline(idx_x, color='white', linestyle='--', alpha=0.5, linewidth=1.0)
+        if start_pct_y < pct < end_pct_y:
+            idx_y = (pct - start_pct_y) / (end_pct_y - start_pct_y) * (n_bins - 1)
+            # Horizontal line (Key boundary, Y-axis)
+            ax.axhline(idx_y, color='white', linestyle='--', alpha=0.5, linewidth=1.0)
 
 
 def plot_single_heatmap(ax, matrix: np.ndarray, title: str, vmin: float = 0.0, vmax: float = None, 
-                        boundaries_pct: dict = None, tick_indices: list = None, tick_labels: list = None,
-                        start_pct: float = 0.0, end_pct: float = 100.0):
+                        boundaries_pct: dict = None, 
+                        tick_indices_x: list = None, tick_labels_x: list = None,
+                        tick_indices_y: list = None, tick_labels_y: list = None,
+                        start_pct_x: float = 0.0, end_pct_x: float = 100.0,
+                        start_pct_y: float = 0.0, end_pct_y: float = 100.0):
     """
     Helper to plot a transposed heatmap (Query on X-axis, Key on Y-axis).
     Row represents Key, Column represents Query.
@@ -397,17 +387,20 @@ def plot_single_heatmap(ax, matrix: np.ndarray, title: str, vmin: float = 0.0, v
     ax.set_ylabel("Key (% Gait Cycle)", fontsize=10)
     ax.invert_yaxis()
     
-    if tick_indices is None:
-        tick_indices = [0.0, 0.25 * n_bins, 0.50 * n_bins, 0.75 * n_bins, 1.0 * n_bins]
-        tick_labels = ['0', '25', '50', '75', '100']
+    if tick_indices_x is None:
+        tick_indices_x = [0.0, 0.25 * n_bins, 0.50 * n_bins, 0.75 * n_bins, 1.0 * n_bins]
+        tick_labels_x = ['0', '25', '50', '75', '100']
+    if tick_indices_y is None:
+        tick_indices_y = tick_indices_x
+        tick_labels_y = tick_labels_x
         
-    ax.set_xticks(tick_indices)
-    ax.set_xticklabels(tick_labels)
-    ax.set_yticks(tick_indices)
-    ax.set_yticklabels(tick_labels)
+    ax.set_xticks(tick_indices_x)
+    ax.set_xticklabels(tick_labels_x)
+    ax.set_yticks(tick_indices_y)
+    ax.set_yticklabels(tick_labels_y)
     
     if boundaries_pct:
-        draw_gait_phase_elements(ax, n_bins, boundaries_pct, start_pct, end_pct)
+        draw_gait_phase_elements(ax, n_bins, boundaries_pct, start_pct_x, end_pct_x, start_pct_y, end_pct_y)
 
 
 # ==========================================
@@ -502,9 +495,12 @@ def main():
     # Sequence length configurations
     seq_len = inputs.shape[1]
     
-    # Get dynamic gait cycle mapping for the input sequence (Self-Attention)
-    pct_array, tick_indices, tick_vals, tick_labels = get_gait_phase_ticks(stride_type_X, seq_len)
-    start_pct, end_pct = pct_array[0], pct_array[-1]
+    # Get dynamic gait cycle mapping for Input and Output sequences
+    pct_array_in, tick_indices_in, tick_vals_in, tick_labels_in = get_gait_phase_ticks(stride_type_X, seq_len)
+    start_pct_in, end_pct_in = pct_array_in[0], pct_array_in[-1]
+    
+    pct_array_out, tick_indices_out, tick_vals_out, tick_labels_out = get_gait_phase_ticks(stride_type_Y, seq_len)
+    start_pct_out, end_pct_out = pct_array_out[0], pct_array_out[-1]
     
     # 2. Setup Gait Phase boundaries
     gait_phases = DEFAULT_GAIT_PHASES
@@ -515,7 +511,8 @@ def main():
         except Exception as e:
             print(f"Error parsing gait_phases_json: {e}. Using default.")
             
-    boundaries = get_phase_boundaries(gait_phases, seq_len)
+    boundaries_in = get_phase_boundaries(gait_phases, seq_len, start_pct_in, end_pct_in)
+    boundaries_out = get_phase_boundaries(gait_phases, seq_len, start_pct_out, end_pct_out)
     
     # 3. Setup Downsample Bin settings
     downsample_ratio = 1.0
@@ -602,7 +599,10 @@ def main():
             plot_single_heatmap(
                 ax_l, l_avg, f"Layer {l_idx+1} Mean (Sample {s_idx})",
                 vmin=0.0, vmax=vmax, boundaries_pct=gait_phases,
-                tick_indices=tick_indices, tick_labels=tick_labels, start_pct=start_pct, end_pct=end_pct
+                tick_indices_x=tick_indices_in, tick_labels_x=tick_labels_in,
+                tick_indices_y=tick_indices_in, tick_labels_y=tick_labels_in,
+                start_pct_x=start_pct_in, end_pct_x=end_pct_in,
+                start_pct_y=start_pct_in, end_pct_y=end_pct_in
             )
             fig_l.savefig(
                 os.path.join(output_base, "layerwise", f"layer{l_idx+1}_sample{s_idx}.png"),
@@ -655,12 +655,12 @@ def main():
         # Save Rollout Profile (Key-wise Profile only)
         transposed_rollout = s_rollout.T # (Key, Query)
         key_profile = np.mean(transposed_rollout, axis=1) # Mean over Query
-        gait_cycle_pct = pct_array
+        gait_cycle_pct = pct_array_in
 
         # ------------------------------------------
         # C. Phase-to-Phase Matrix Calculation (Rollout-based)
         # ------------------------------------------
-        p_matrix = calculate_phase_matrix(s_rollout_raw, seq_len, boundaries)
+        p_matrix = calculate_phase_matrix(s_rollout_raw, seq_len, boundaries_q=boundaries_out, boundaries_k=boundaries_in)
         
         # Save Phase Matrix heatmap (using phase names as labels)
         fig_pm, ax_pm = plt.subplots(figsize=(7, 6))
@@ -686,7 +686,7 @@ def main():
             dpi=300, bbox_inches='tight'
         )
         plt.close(fig_pm)
-        gait_cycle_pct = pct_array
+        gait_cycle_pct = pct_array_in
         
         fig_prof, ax_prof = plt.subplots(figsize=(10, 4))
         ax_prof.plot(gait_cycle_pct, key_profile, 'b-', linewidth=2.0, label="Key-wise Profile (Importance as Reference)")
@@ -695,8 +695,9 @@ def main():
         ax_prof.set_ylabel("Attention Weight", fontsize=10)
         ax_prof.grid(True, linestyle=":", alpha=0.6)
         ax_prof.legend()
-        ax_prof.set_xlim(0, 100)
-        ax_prof.set_xticks([0, 25, 50, 75, 100])
+        ax_prof.set_xlim(start_pct_in, end_pct_in)
+        ax_prof.set_xticks(tick_vals_in)
+        ax_prof.set_xticklabels(tick_labels_in)
         fig_prof.savefig(
             os.path.join(output_base, "rollout", f"rollout_profile_sample{s_idx}.png"),
             dpi=300, bbox_inches='tight'
@@ -708,7 +709,7 @@ def main():
         colors = ["tab:blue", "tab:orange", "tab:green"]
         for l_idx in range(num_layers):
             mean_prof_l = np.mean(layer_averages[l_idx], axis=0) # Mean over Query
-            gait_cycle_pct_l = pct_array
+            gait_cycle_pct_l = pct_array_in
             
             ax_l_prof.plot(gait_cycle_pct_l, mean_prof_l,
                 label=f"Layer {l_idx + 1}",
@@ -720,9 +721,9 @@ def main():
         ax_l_prof.set_ylabel("Key-wise Attention Mean", fontsize=10)
         ax_l_prof.grid(True, linestyle=":", alpha=0.6)
         ax_l_prof.legend(loc="upper right")
-        ax_l_prof.set_xlim(start_pct, end_pct)
-        ax_l_prof.set_xticks(tick_vals)
-        ax_l_prof.set_xticklabels(tick_labels)
+        ax_l_prof.set_xlim(start_pct_in, end_pct_in)
+        ax_l_prof.set_xticks(tick_vals_in)
+        ax_l_prof.set_xticklabels(tick_labels_in)
         fig_l_prof.savefig(
             os.path.join(output_base, "rollout", f"layer_attention_profile_sample{s_idx}.png"),
             dpi=300, bbox_inches='tight'
@@ -756,7 +757,11 @@ def main():
             fig_l, ax_l = plt.subplots(figsize=(6, 5))
             plot_single_heatmap(
                 ax_l, agg_m, f"Aggregated Layer {l_idx+1} Mean (N={num_samples})",
-                vmin=0.0, vmax=vmax, boundaries_pct=gait_phases
+                vmin=0.0, vmax=vmax, boundaries_pct=gait_phases,
+                tick_indices_x=tick_indices_in, tick_labels_x=tick_labels_in,
+                tick_indices_y=tick_indices_in, tick_labels_y=tick_labels_in,
+                start_pct_x=start_pct_in, end_pct_x=end_pct_in,
+                start_pct_y=start_pct_in, end_pct_y=end_pct_in
             )
             fig_l.savefig(
                 os.path.join(output_base, "layerwise", f"layer{l_idx+1}_mean_aggregate.png"),
@@ -775,7 +780,11 @@ def main():
                 fig_h, ax_h = plt.subplots(figsize=(6, 5))
                 plot_single_heatmap(
                     ax_h, head_map, f"Aggregated Layer {l_idx+1} Head {h_idx} Mean (N={num_samples})",
-                    vmin=0.0, vmax=vmax, boundaries_pct=gait_phases
+                    vmin=0.0, vmax=vmax, boundaries_pct=gait_phases,
+                    tick_indices_x=tick_indices_in, tick_labels_x=tick_labels_in,
+                    tick_indices_y=tick_indices_in, tick_labels_y=tick_labels_in,
+                    start_pct_x=start_pct_in, end_pct_x=end_pct_in,
+                    start_pct_y=start_pct_in, end_pct_y=end_pct_in
                 )
                 fig_h.savefig(
                     os.path.join(output_base, "headwise", f"layer{l_idx+1}_head{h_idx}_mean_aggregate.png"),
@@ -795,7 +804,11 @@ def main():
         fig_r, ax_r = plt.subplots(figsize=(6, 5))
         plot_single_heatmap(
             ax_r, agg_rollout, f"Aggregated Rollout (N={num_samples}, Head: {args.head_idx})",
-            vmin=0.0, vmax=vmax, boundaries_pct=gait_phases
+            vmin=0.0, vmax=vmax, boundaries_pct=gait_phases,
+            tick_indices_x=tick_indices_out, tick_labels_x=tick_labels_out,
+            tick_indices_y=tick_indices_in, tick_labels_y=tick_labels_in,
+            start_pct_x=start_pct_out, end_pct_x=end_pct_out,
+            start_pct_y=start_pct_in, end_pct_y=end_pct_in
         )
         
         filter_suffix = ""
@@ -811,7 +824,7 @@ def main():
         plt.close(fig_r)
 
         # 3. Aggregated Phase Matrix (Rollout-based)
-        p_matrix_agg = calculate_phase_matrix(agg_rollout_raw, seq_len, boundaries)
+        p_matrix_agg = calculate_phase_matrix(agg_rollout_raw, seq_len, boundaries_q=boundaries_out, boundaries_k=boundaries_in)
         
         fig_pm, ax_pm = plt.subplots(figsize=(7, 6))
         phase_names = list(boundaries.keys())
@@ -848,7 +861,7 @@ def main():
             
         mean_prof = np.mean(batch_key_profiles, axis=0)
         std_prof = np.std(batch_key_profiles, axis=0)
-        gait_cycle_pct = pct_array
+        gait_cycle_pct = pct_array_in
         
         fig_prof, ax_prof = plt.subplots(figsize=(10, 4))
         ax_prof.plot(gait_cycle_pct, mean_prof, color="tab:blue", linewidth=2.0, label="Global Mean Rollout Profile")
@@ -864,9 +877,9 @@ def main():
         ax_prof.set_ylabel("Rollout Weight", fontsize=10)
         ax_prof.grid(True, linestyle=":", alpha=0.6)
         ax_prof.legend()
-        ax_prof.set_xlim(start_pct, end_pct)
-        ax_prof.set_xticks(tick_vals)
-        ax_prof.set_xticklabels(tick_labels)
+        ax_prof.set_xlim(start_pct_in, end_pct_in)
+        ax_prof.set_xticks(tick_vals_in)
+        ax_prof.set_xticklabels(tick_labels_in)
         fig_prof.savefig(
             os.path.join(output_base, "rollout", f"rollout_profile_aggregate{filter_suffix}.png"),
             dpi=300, bbox_inches='tight'
@@ -907,9 +920,9 @@ def main():
         ax_layers.set_ylabel("Key-wise Attention Mean", fontsize=10)
         ax_layers.grid(True, linestyle=":", alpha=0.6)
         ax_layers.legend(loc="upper right")
-        ax_layers.set_xlim(start_pct, end_pct)
-        ax_layers.set_xticks(tick_vals)
-        ax_layers.set_xticklabels(tick_labels)
+        ax_layers.set_xlim(start_pct_in, end_pct_in)
+        ax_layers.set_xticks(tick_vals_in)
+        ax_layers.set_xticklabels(tick_labels_in)
         fig_layers.savefig(
             os.path.join(output_base, "rollout", "layer_attention_profile_aggregate.png"),
             dpi=300, bbox_inches='tight'

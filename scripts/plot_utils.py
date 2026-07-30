@@ -1,5 +1,19 @@
 import numpy as np
 
+# Default gait phase ratio (in % of stride cycle)
+DEFAULT_GAIT_PHASES = {
+    'pre-ISw': (-40.0, -25.0),  # Initial Swing (previous cycle)
+    'pre-MSw': (-25.0, -15.0),  # Mid Swing (previous cycle)
+    'pre-TSw': (-15.0, 0.0),    # Terminal Swing (previous cycle)
+    'LR':  (0.0, 10.0),   # Loading Response
+    'MSt': (10.0, 30.0),  # Mid Stance
+    'TSt': (30.0, 50.0),  # Terminal Stance
+    'PSw': (50.0, 60.0),  # Pre Swing
+    'ISw': (60.0, 75.0),  # Initial Swing
+    'MSw': (75.0, 85.0),  # Mid Swing
+    'TSw': (85.0, 100.0)  # Terminal Swing
+}
+
 def get_gait_phase_ticks(stride_type: str, num_steps: int = 200):
     """
     Returns time mapping and ticks for a specific gait stride pattern.
@@ -17,9 +31,9 @@ def get_gait_phase_ticks(stride_type: str, num_steps: int = 200):
     if stride_type == '0.5':
         start_pct, end_pct = 0, 60
     elif stride_type in ['1.0_pre_swing', 'pre']:
-        start_pct, end_pct = -60, 60
+        start_pct, end_pct = -40, 60
     elif stride_type == '1.5':
-        start_pct, end_pct = -60, 100
+        start_pct, end_pct = -40, 100
     else:
         # Default covers '1.0', '1.0_post_swing', 'post'
         start_pct, end_pct = 0, 100
