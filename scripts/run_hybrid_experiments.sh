@@ -31,6 +31,8 @@ echo "=========================================================="
 echo " Starting Hybrid GRF (GNN + Transformer) Training Pipeline"
 echo "=========================================================="
 
+export PYTHONPATH="$(pwd):$PYTHONPATH"
+
 # 実行する入力パターン(X)と，それぞれに対応する実験名(exp_name)の配列
 INPUT_STRIDES=("0.5" "1.0_pre_swing" "1.0_post_swing" "1.5")
 EXP_NAMES=("hybrid_grf_single_0.5" "hybrid_grf_single_pre_swing" "hybrid_grf_single_post_swing" "hybrid_grf_single_1.5")
