@@ -821,10 +821,9 @@ def main():
         plt.close(fig_r)
 
         # 3. Aggregated Phase Matrix (Rollout-based)
-        p_matrix_agg = calculate_phase_matrix(agg_rollout_raw, seq_len, boundaries_q=boundaries_out, boundaries_k=boundaries_in)
+        p_matrix_agg, phase_names_q, phase_names_k = calculate_phase_matrix(agg_rollout_raw, seq_len, boundaries_q=boundaries_out, boundaries_k=boundaries_in)
         
         fig_pm, ax_pm = plt.subplots(figsize=(7, 6))
-        phase_names = list(boundaries_in.keys())
         sns.heatmap(
             p_matrix_agg, 
             cmap="viridis", 
@@ -832,14 +831,14 @@ def main():
             fmt=".4f", 
             ax=ax_pm, 
             square=True,
-            xticklabels=phase_names,
-            yticklabels=phase_names
+            xticklabels=phase_names_q,
+            yticklabels=phase_names_k
         )
         ax_pm.set_title(f"Aggregated Phase Matrix (N={num_samples})", fontsize=12, fontweight='bold')
-        ax_pm.set_xlabel("Query (Current Phase)", fontsize=10)
-        ax_pm.set_ylabel("Key (Attended Phase)", fontsize=10)
-        ax_pm.set_xticklabels(phase_names, rotation=45)
-        ax_pm.set_yticklabels(phase_names, rotation=0)
+        ax_pm.set_xlabel("Query (Current Phase / Output)", fontsize=10)
+        ax_pm.set_ylabel("Key (Attended Phase / Input)", fontsize=10)
+        ax_pm.set_xticklabels(phase_names_q, rotation=45)
+        ax_pm.set_yticklabels(phase_names_k, rotation=0)
         ax_pm.invert_yaxis()
         fig_pm.savefig(
             os.path.join(output_base, "phase_matrix", f"phase_matrix_aggregate.png"),
