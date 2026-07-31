@@ -24,7 +24,7 @@ LR=0.001
 PATIENCE=20
 FACTOR=0.5
 STRIDE_Y="0.5" # From previous experiments
-
+# システムのPythonを使用するパスを設定
 PYTHON_EXEC="python"
 
 echo "=========================================================="
