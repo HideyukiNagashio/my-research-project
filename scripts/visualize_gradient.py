@@ -761,7 +761,7 @@ def main():
         os.makedirs(os.path.join(fold_out_dir, "average"), exist_ok=True)
         os.makedirs(os.path.join(fold_out_dir, "phase"), exist_ok=True)
         
-        phase_slices = get_phase_indices(seq_len, 0.0, 100.0)
+        phase_slices = get_phase_indices(seq_len, start_pct_out, end_pct_out)
         
         # We will loop over each output column o_c
         for o_c in out_cols:
