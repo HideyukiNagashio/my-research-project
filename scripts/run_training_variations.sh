@@ -2,9 +2,8 @@
 
 # --- 共通パラメータ ---
 COMMON_ARGS=(
-    --exp_name "transformer_grf_pressure_single_weighted"
     --seed 42
-    --data_dir "data/processed/cv"
+    --data_dir "data/processed/cv_grf"
     --input_type "pressure_single"
     --target_type "grf_only"
     --model_type "transformer"
@@ -24,17 +23,22 @@ COMMON_ARGS=(
     # use_weighted_loss は「なし」のため付与しません
 )
 
+BASE_EXP_NAME="transformer_grf_pressure_single_weighted"
+
 echo "========================================================="
 echo " Training 1: Input(X) = 0.5, Target(Y) = 0.5"
 echo "========================================================="
-python scripts/train_cv.py "${COMMON_ARGS[@]}" --stride_type_X "0.5"
+EXP_NAME="${BASE_EXP_NAME}_X_0.5_Y_0.5"
+python scripts/train_cv.py "${COMMON_ARGS[@]}" --exp_name "$EXP_NAME" --stride_type_X "0.5"
 
 echo "========================================================="
 echo " Training 2: Input(X) = pre_swing, Target(Y) = 0.5"
 echo "========================================================="
-python scripts/train_cv.py "${COMMON_ARGS[@]}" --stride_type_X "1.0_pre_swing"
+EXP_NAME="${BASE_EXP_NAME}_X_1.0_pre_swing_Y_0.5"
+python scripts/train_cv.py "${COMMON_ARGS[@]}" --exp_name "$EXP_NAME" --stride_type_X "1.0_pre_swing"
 
 echo "========================================================="
 echo " Training 3: Input(X) = post_swing, Target(Y) = 0.5"
 echo "========================================================="
-python scripts/train_cv.py "${COMMON_ARGS[@]}" --stride_type_X "1.0_post_swing"
+EXP_NAME="${BASE_EXP_NAME}_X_1.0_post_swing_Y_0.5"
+python scripts/train_cv.py "${COMMON_ARGS[@]}" --exp_name "$EXP_NAME" --stride_type_X "1.0_post_swing"
