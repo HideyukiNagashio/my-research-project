@@ -1,7 +1,7 @@
 {
-    "exp_name": "hybrid_grf_single_post_swing",
+    "exp_name": "hybrid_grf_X_1.0_post_swing_Y_0.5",
     "seed": 42,
-    "data_dir": "data/processed/cv",
+    "data_dir": "data/processed/cv_grf",
     "input_type": "single_leg",
     "target_type": "grf_only",
     "stride_type_X": "1.0_post_swing",

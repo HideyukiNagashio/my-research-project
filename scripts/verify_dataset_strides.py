@@ -15,7 +15,7 @@ def classify_stride_pattern(mean_signal):
     if max_val == 0:
         return "unknown (all zero)"
         
-    threshold = 0.1 * max_val  # 最大値の10%をゼロ判定の閾値とする
+    threshold = 0.15 * max_val  # 最大値の15%をゼロ判定の閾値とする
     
     # 全200サンプルのうち、最初の20%（0〜40）と最後の20%（160〜200）の平均値をチェック
     start_mean = np.mean(mean_signal[:40])
