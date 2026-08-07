@@ -3,7 +3,7 @@
 # --- 共通パラメータ ---
 COMMON_ARGS=(
     --seed 42
-    --data_dir "data/processed/cv_grf"
+    --data_dir "data/processed/cv"
     --input_type "pressure_single"
     --target_type "grf_only"
     --model_type "transformer"
