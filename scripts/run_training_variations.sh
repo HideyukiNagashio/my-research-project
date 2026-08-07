@@ -23,7 +23,7 @@ COMMON_ARGS=(
     # use_weighted_loss は「なし」のため付与しません
 )
 
-BASE_EXP_NAME="transformer_grf_pressure_single_weighted"
+BASE_EXP_NAME="transformer_grf_pressure_single"
 
 echo "========================================================="
 echo " Training 1: Input(X) = 0.5, Target(Y) = 0.5"
