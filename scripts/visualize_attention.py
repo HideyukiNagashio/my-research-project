@@ -496,7 +496,7 @@ def plot_all_attention_approaches(agg_maps, agg_rollout_raw, num_samples, output
     # 1. Calculate and save Layerwise Aggregated Maps, and Aggregate Head-wise Maps
     layer_averages = []
     for l_idx in range(num_layers):
-        agg_m = np.mean(np.mean(agg_maps[l_idx], axis=1), axis=0) # (SeqLen, SeqLen)
+        agg_m = np.mean(agg_maps[l_idx], axis=0) # (SeqLen, SeqLen)
         if args.downsample_bins:
             agg_m = temporal_binning(agg_m, args.downsample_bins)
         layer_averages.append(agg_m)
@@ -513,9 +513,9 @@ def plot_all_attention_approaches(agg_maps, agg_rollout_raw, num_samples, output
         fig_l.savefig(os.path.join(output_base, "layerwise", f"layer{l_idx+1}_mean_aggregate{filter_suffix}.png"), dpi=300, bbox_inches='tight')
         plt.close(fig_l)
         
-        nheads = agg_maps[l_idx].shape[1]
+        nheads = agg_maps[l_idx].shape[0]
         for h_idx in range(nheads):
-            head_map = np.mean(agg_maps[l_idx][:, h_idx], axis=0)
+            head_map = agg_maps[l_idx][h_idx]
             if args.downsample_bins:
                 head_map = temporal_binning(head_map, args.downsample_bins)
             fig_h, ax_h = plt.subplots(figsize=(6, 5))
