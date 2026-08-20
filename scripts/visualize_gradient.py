@@ -139,29 +139,31 @@ def compute_dynamics_map_slow(model, input_data, out_col, in_col):
 def compute_dynamics_map_all_features(model, input_data, out_col, timers=None):
     """
     Computes absolute gradients for all input features across all output time steps
-    in a single forward pass and seq_len backward passes.
+    in a single forward pass and seq_len backward passes, supporting BATCH PROCESSING.
     
     Args:
         model: PyTorch model
-        input_data: Input tensor of shape (1, seq_len, in_dim) with requires_grad=True
+        input_data: Input tensor of shape (batch_size, seq_len, in_dim) with requires_grad=True
         out_col: Target output index (0~2)
         timers: Optional dictionary to record breakdown of execution times
         
     Returns:
         dynamics_maps: numpy array of shape (in_dim, seq_len, seq_len)
+                       representing the SUM of absolute gradients across the batch.
                        [in_dim, input_time_y, output_time_x]
     """
     t_start = time.time()
     model.eval()
+    batch_size = input_data.shape[0]
     seq_len = input_data.shape[1]
     in_dim = input_data.shape[2]
     
     dynamics_maps = np.zeros((in_dim, seq_len, seq_len))
     
-    # 1. Forward pass only once
+    # 1. Forward pass for the entire batch
     if timers is not None:
         t_fwd_start = time.time()
-    outputs = model(input_data)  # Shape: (1, seq_len, out_dim)
+    outputs = model(input_data)  # Shape: (batch_size, seq_len, out_dim)
     if timers is not None:
         timers['Forward'] += time.time() - t_fwd_start
         timers['forward_calls'] += 1
@@ -171,7 +173,9 @@ def compute_dynamics_map_all_features(model, input_data, out_col, timers=None):
             input_data.grad.zero_()
         model.zero_grad()
         
-        score = outputs[0, x, out_col]
+        # Taking the sum over the batch computes independent gradients perfectly 
+        # because the forward pass across samples in a batch is completely independent.
+        score = outputs[:, x, out_col].sum()
         
         # 2. Backward pass. Retain graph for all steps except the last one to release memory.
         is_last = (x == seq_len - 1)
@@ -184,8 +188,12 @@ def compute_dynamics_map_all_features(model, input_data, out_col, timers=None):
         if input_data.grad is not None:
             if timers is not None:
                 t_agg_start = time.time()
-            grad_all = np.abs(input_data.grad[0].cpu().numpy())  # Shape: (seq_len, in_dim)
-            dynamics_maps[:, :, x] = grad_all.T
+            
+            # input_data.grad shape is (batch_size, seq_len, in_dim)
+            # We want to sum the absolute gradients across the batch
+            grad_all_sum = np.sum(np.abs(input_data.grad.cpu().numpy()), axis=0)  # Shape: (seq_len, in_dim)
+            dynamics_maps[:, :, x] = grad_all_sum.T
+            
             if timers is not None:
                 timers['Aggregation'] += time.time() - t_agg_start
                 
