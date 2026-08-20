@@ -833,7 +833,7 @@ def process_fold(args, fold, device, global_accum=None):
         # ------------------------------------------
         # B. Attention Rollout Calculation
         # ------------------------------------------
-        rollout_batch = calculate_attention_rollout(attention_maps, args.head_idx) # (Batch, SeqLen, SeqLen)
+        # rollout_batch is already calculated or loaded from cache above
         s_rollout_raw = rollout_batch[s_idx] # Keep raw rollout of shape (SeqLen, SeqLen)
         
         s_rollout = s_rollout_raw
@@ -939,7 +939,7 @@ def process_fold(args, fold, device, global_accum=None):
         agg_inputs = inputs[sample_indices]
         agg_preds = preds[sample_indices]
         agg_targets = targets[sample_indices]
-        agg_maps = [m[sample_indices] for m in attention_maps]
+        # agg_maps is already calculated or loaded from cache above
         
         num_samples = len(agg_inputs)
         num_layers = len(agg_maps)
