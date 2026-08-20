@@ -692,35 +692,70 @@ def process_fold(args, fold, device, global_accum=None):
             vmax = global_vmax if args.shared_cmap else None
             
     else:
-        print("Extracting attention weights (running model forward pass)...")
-        if args.mode == "aggregate":
-            inputs_tensor = torch.tensor(inputs[sample_indices], dtype=torch.float32).to(device)
-        else:
-            inputs_tensor = torch.tensor(inputs[args.sample_idx:args.sample_idx+1], dtype=torch.float32).to(device)
-            
-        _, attention_maps = extract_attention_maps(model, inputs_tensor, device)
-        rollout_batch = compute_rollout_batch(attention_maps, head_idx="mean")
+        print("Extracting attention weights (running model forward pass with batching)...")
+        batch_size = 128
         
         if args.mode == "aggregate":
-            agg_maps = [np.mean(layer_map, axis=0) for layer_map in attention_maps]
-            agg_rollout_raw = np.mean(rollout_batch, axis=0)
+            indices_to_run = sample_indices
+        else:
+            indices_to_run = [args.sample_idx]
             
+        num_samples_run = len(indices_to_run)
+        
+        agg_maps_sum = None
+        agg_rollout_sum = None
+        vmax_samples = []
+        
+        for b_start in range(0, num_samples_run, batch_size):
+            batch_indices = indices_to_run[b_start:b_start+batch_size]
+            inputs_batch = torch.tensor(inputs[batch_indices], dtype=torch.float32).to(device)
+            
+            _, batch_attn_maps_gpu = extract_attention_maps(model, inputs_batch, device)
+            batch_rollout_gpu = calculate_attention_rollout(batch_attn_maps_gpu, head_idx=args.head_idx)
+            
+            # For VMAX calculation, convert only this batch's maps to CPU to compute percentile
+            batch_attn_maps = [m.cpu().numpy() for m in batch_attn_maps_gpu]
+            batch_rollout = batch_rollout_gpu.cpu().numpy()
+            
+            batch_vmax = compute_global_vmax(batch_attn_maps)
+            vmax_samples.append((batch_vmax, len(batch_indices)))
+            
+            if agg_maps_sum is None:
+                agg_maps_sum = [np.sum(m, axis=0) for m in batch_attn_maps]
+                agg_rollout_sum = np.sum(batch_rollout, axis=0)
+            else:
+                for l in range(len(batch_attn_maps)):
+                    agg_maps_sum[l] += np.sum(batch_attn_maps[l], axis=0)
+                agg_rollout_sum += np.sum(batch_rollout, axis=0)
+                
+            # Free batch variables to ensure memory is released
+            del inputs_batch, batch_attn_maps_gpu, batch_rollout_gpu, batch_attn_maps, batch_rollout
+            torch.cuda.empty_cache()
+            
+        # Calculate final means
+        agg_maps = [m / num_samples_run for m in agg_maps_sum]
+        agg_rollout_raw = agg_rollout_sum / num_samples_run
+        
+        # Approximate global vmax as weighted average of batch vmaxes
+        total_weight = sum(w for _, w in vmax_samples)
+        global_vmax = sum(v * w for v, w in vmax_samples) / total_weight if total_weight > 0 else 0.05
+        print(f"Computed Global Attention vmax (99th percentile approximation): {global_vmax:.5f}")
+        vmax = global_vmax if args.shared_cmap else None
+        
+        if args.mode == "aggregate":
             np.save(cache_maps_file, np.array(agg_maps))
             np.save(cache_rollout_file, agg_rollout_raw)
             print(f"[Cache] Saved aggregated maps to {cache_dir}")
-            
-            global_vmax = compute_global_vmax(attention_maps)
-            print(f"Computed Global Attention vmax (99th percentile): {global_vmax:.5f}")
-            vmax = global_vmax if args.shared_cmap else None
         else:
-            sample_maps = [layer_map[0] for layer_map in attention_maps]
+            sample_maps = agg_maps # already divided by 1, so it is just the sample
             np.save(cache_maps_file, np.array(sample_maps))
-            np.save(cache_rollout_file, rollout_batch[0])
+            np.save(cache_rollout_file, agg_rollout_raw)
             print(f"[Cache] Saved single sample maps to {cache_dir}")
             
-            global_vmax = compute_global_vmax(attention_maps)
-            print(f"Computed Global Attention vmax (99th percentile): {global_vmax:.5f}")
-            vmax = global_vmax if args.shared_cmap else None
+            # Recreate mock list structure expected by single mode plotting logic
+            attention_maps = [np.expand_dims(sample_maps[i], axis=0) for i in range(len(sample_maps))]
+            rollout_batch = np.expand_dims(agg_rollout_raw, axis=0)
+            s_idx = 0  # Re-index because we mocked the batch to size 1
 
     # ==========================================
     # Run Mode executions

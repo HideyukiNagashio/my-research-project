@@ -158,7 +158,10 @@ def compute_dynamics_map_all_features(model, input_data, out_col, timers=None):
     seq_len = input_data.shape[1]
     in_dim = input_data.shape[2]
     
-    dynamics_maps = np.zeros((in_dim, seq_len, seq_len))
+    import torch
+    
+    # Pre-allocate result on GPU to avoid CPU synchronization in the loop
+    dynamics_maps_gpu = torch.zeros((in_dim, seq_len, seq_len), device=input_data.device)
     
     # 1. Forward pass for the entire batch
     if timers is not None:
@@ -190,12 +193,15 @@ def compute_dynamics_map_all_features(model, input_data, out_col, timers=None):
                 t_agg_start = time.time()
             
             # input_data.grad shape is (batch_size, seq_len, in_dim)
-            # We want to sum the absolute gradients across the batch
-            grad_all_sum = np.sum(np.abs(input_data.grad.cpu().numpy()), axis=0)  # Shape: (seq_len, in_dim)
-            dynamics_maps[:, :, x] = grad_all_sum.T
+            # We sum the absolute gradients across the batch entirely on the GPU
+            grad_all_sum = input_data.grad.abs().sum(dim=0)  # Shape: (seq_len, in_dim) on GPU
+            dynamics_maps_gpu[:, :, x] = grad_all_sum.T
             
             if timers is not None:
                 timers['Aggregation'] += time.time() - t_agg_start
+                
+    # Final single transfer to CPU memory
+    dynamics_maps = dynamics_maps_gpu.cpu().numpy()
                 
     if timers is not None:
         elapsed = time.time() - t_start
