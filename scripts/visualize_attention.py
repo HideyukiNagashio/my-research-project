@@ -199,7 +199,8 @@ def extract_attention_maps(model, x, device='cpu'):
                 # Add head dimension: (Batch, SeqLen, SeqLen) -> (Batch, 1, SeqLen, SeqLen)
                 attn_weights = attn_weights.unsqueeze(1)
                 
-            attention_maps.append(attn_weights.cpu().numpy())
+            # Keep attention maps on GPU as PyTorch tensors for fast Rollout calculation
+            attention_maps.append(attn_weights)
             
         # 3. Final regression head
         output = model.fc(current_features)
@@ -242,43 +243,46 @@ def temporal_binning(A: np.ndarray, bins: int) -> np.ndarray:
         raise ValueError(f"Unsupported attention array dimensions: {A.ndim}")
 
 
-def calculate_attention_rollout(attention_maps: list, head_idx: str = "mean") -> np.ndarray:
+def calculate_attention_rollout(attention_maps: list, head_idx: str = "mean"):
     """
     Computes cumulative Attention Rollout considering residual connections and layer product.
-    R_l = \\hat{A}_l @ R_{l-1}, where \\hat{A}_l = A_l + I (normalized).
+    Optimized for PyTorch GPU execution to prevent CPU bottlenecks.
     
     Args:
-        attention_maps: List of length num_layers. Each item is shape (Batch, nhead, SeqLen, SeqLen).
+        attention_maps: List of PyTorch tensors, each shape (Batch, nhead, SeqLen, SeqLen) on GPU.
         head_idx: 'mean' or specific head index.
         
     Returns:
-        Rollout matrix of shape (Batch, SeqLen, SeqLen) (Batch, Query, Key).
+        Rollout matrix of shape (Batch, SeqLen, SeqLen) (Batch, Query, Key) as a PyTorch tensor on GPU.
     """
+    import torch
     num_layers = len(attention_maps)
     batch_size = attention_maps[0].shape[0]
     seq_len = attention_maps[0].shape[-1]
+    device = attention_maps[0].device
     
-    # Initialize rollout R_0 as identity matrix (Batch, SeqLen, SeqLen)
-    R = np.tile(np.eye(seq_len), (batch_size, 1, 1))
+    # Initialize rollout R_0 as identity matrix (Batch, SeqLen, SeqLen) on GPU
+    I = torch.eye(seq_len, device=device).unsqueeze(0).expand(batch_size, -1, -1)
+    R = I.clone()
     
     for layer_idx in range(num_layers):
         layer_map = attention_maps[layer_idx] # (Batch, nhead, SeqLen, SeqLen)
         
         # 1. Average or select heads
         if head_idx == "mean":
-            A = np.mean(layer_map, axis=1) # (Batch, SeqLen, SeqLen)
+            A = torch.mean(layer_map, dim=1) # (Batch, SeqLen, SeqLen)
         else:
             A = layer_map[:, int(head_idx)] # (Batch, SeqLen, SeqLen)
             
         # 2. Add residual connection: \hat{A} = A + I
-        I = np.tile(np.eye(seq_len), (batch_size, 1, 1))
         A_hat = A + I
         
         # 3. Row normalization: make rows sum to 1. Query is axis=1, Key is axis=2.
-        A_hat = A_hat / A_hat.sum(axis=-1, keepdims=True)
+        A_hat = A_hat / A_hat.sum(dim=-1, keepdim=True)
         
         # 4. Multiply with cumulative rollout: R_l = A_hat_l @ R_{l-1}
-        R = np.matmul(A_hat, R)
+        # torch.bmm is extremely fast for batched matrix multiplication on GPU
+        R = torch.bmm(A_hat, R)
         
     return R
 
