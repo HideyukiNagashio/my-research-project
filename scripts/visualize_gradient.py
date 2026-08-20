@@ -54,7 +54,60 @@ def get_phase_indices(seq_len=200, seq_start_pct=0.0, seq_end_pct=100.0):
     return indices
 
 
+
+def plot_all_gradient_approaches(mean_3d_dynamics, fold_out_dir, out_label, feature_names, in_cols, x_tick_indices, x_tick_labels, y_tick_indices, y_tick_labels, stride_type_X, stride_type_Y, phase_slices, in_dim, seq_len, sample_suffix):
+    # --- 2. Approach 1: Dynamics Maps ---
+    print(f"\n--> Running Approach 1: Dynamics Maps for Output {out_label}...")
+    t_app1_start = time.time()
+    timers_app1 = {'Plotting': 0.0, 'Save Figure': 0.0}
+    for i_c in in_cols:
+        in_label = feature_names[i_c]
+        mean_dynamics = mean_3d_dynamics[i_c, :, :]
+        save_path = os.path.join(fold_out_dir, "dynamics", f"dynamics_map_{out_label}_vs_{in_label}{sample_suffix}.png")
+        plot_dynamics_map(mean_dynamics, out_label, in_label, x_tick_indices, x_tick_labels, y_tick_indices, y_tick_labels, stride_type_out=stride_type_Y, stride_type_in=stride_type_X, save_path=save_path, timers=timers_app1)
+    t_app1_total = time.time() - t_app1_start
+    print(f"Approach 1 Time: {t_app1_total:.3f}s")
+    
+    # --- 3. Approach 2: Overall Average Maps ---
+    print(f"\n--> Running Approach 2: Overall Average Maps for Output {out_label}...")
+    t_app2_start = time.time()
+    timers_app2 = {'Plotting': 0.0, 'Save Figure': 0.0}
+    mean_average = np.mean(mean_3d_dynamics, axis=2)
+    save_path = os.path.join(fold_out_dir, "average", f"overall_average_map_{out_label}{sample_suffix}.png")
+    plot_overall_average_map(mean_average, out_label, feature_names, y_tick_indices, y_tick_labels, stride_type_X, save_path, timers=timers_app2)
+    t_app2_total = time.time() - t_app2_start
+    print(f"Approach 2 Time: {t_app2_total:.3f}s")
+    
+    # --- 4. Approach 3: Phase-wise Smoothed Maps ---
+    print(f"\n--> Running Approach 3: Phase-wise Smoothed Maps for Output {out_label}...")
+    t_app3_start = time.time()
+    timers_app3 = {'Plotting': 0.0, 'Save Figure': 0.0}
+    mean_phase_maps = {}
+    for phase_name, (start_idx, end_idx) in phase_slices.items():
+        if end_idx - start_idx == 0:
+            mean_phase_maps[phase_name] = np.zeros((in_dim, seq_len))
+        else:
+            mean_phase_maps[phase_name] = np.mean(mean_3d_dynamics[:, :, start_idx:end_idx], axis=2)
+    save_path = os.path.join(fold_out_dir, "phase", f"phase_wise_smoothed_maps_{out_label}{sample_suffix}.png")
+    plot_phase_smoothed_maps(mean_phase_maps, out_label, feature_names, y_tick_indices, y_tick_labels, stride_type_X, save_path, timers=timers_app3)
+    t_app3_total = time.time() - t_app3_start
+    print(f"Approach 3 Time: {t_app3_total:.3f}s")
+    
+    # --- 5. Approach 4: Feature Importance Bars ---
+    print(f"\n--> Running Approach 4: Feature Importance for Output {out_label}...")
+    t_app4_start = time.time()
+    timers_app4 = {'Plotting': 0.0, 'Save Figure': 0.0}
+    abs_sums = np.sum(mean_3d_dynamics, axis=(1, 2))
+    total_sum = np.sum(abs_sums)
+    rel_pcts = (abs_sums / total_sum) * 100.0 if total_sum > 0 else abs_sums
+    save_path_abs = os.path.join(fold_out_dir, "importance", f"feature_importance_absolute_{out_label}{sample_suffix}.png")
+    save_path_rel = os.path.join(fold_out_dir, "importance", f"feature_importance_relative_{out_label}{sample_suffix}.png")
+    plot_feature_importance_bars(abs_sums, rel_pcts, feature_names, out_label, save_path_abs, save_path_rel, timers=timers_app4)
+    t_app4_total = time.time() - t_app4_start
+    print(f"Approach 4 Time: {t_app4_total:.3f}s")
+
 # =====================================================================
+
 # Core Computation Algorithms
 # =====================================================================
 
@@ -783,6 +836,9 @@ def main():
     else:
         folds_to_run = [int(args.fold)]
         
+    global_accum = {}
+    global_samples_dict = {}
+    
     for fold in folds_to_run:
         print(f"\n========================================")
         print(f" Processing Fold {fold} / {len(folds_to_run)}")
@@ -868,96 +924,36 @@ def main():
             print(f"  Total            : {t_calc_total:.3f}s")
             print(f"  Forward calls    : {timers_calc['forward_calls']}")
             
-            # --- 2. Approach 1: Dynamics Maps ---
-            print(f"\n--> Running Approach 1: Dynamics Maps for Output {out_label}...")
-            t_app1_start = time.time()
-            timers_app1 = {'Plotting': 0.0, 'Save Figure': 0.0}
-            for i_c in in_cols:
-                in_label = feature_names[i_c]
-                # Slice the accumulated 3D tensor to get the 2D dynamics map for this column
-                mean_dynamics = mean_3d_dynamics[i_c, :, :]  # Shape: (200, 200)
+            # Accumulate globally
+            if args.sample_idx == -1:
+                global_accum[o_c] = global_accum.get(o_c, 0) + mean_3d_dynamics * len(indices_to_avg)
+                global_samples_dict[fold] = len(indices_to_avg)
                 
-                save_path = os.path.join(
-                    fold_out_dir, 
-                    "dynamics", 
-                    f"dynamics_map_{out_label}_vs_{in_label}{sample_suffix}.png"
-                )
-                plot_dynamics_map(mean_dynamics, out_label, in_label, x_tick_indices, x_tick_labels, y_tick_indices, y_tick_labels, stride_type_out=stride_type_Y, stride_type_in=stride_type_X, save_path=save_path, timers=timers_app1)
-            t_app1_total = time.time() - t_app1_start
-            print(f"Approach 1 (Plotting & Saving) Time: {t_app1_total:.3f}s")
-            print(f"  Plotting    : {timers_app1['Plotting']:.3f}s")
-            print(f"  Save Figure : {timers_app1['Save Figure']:.3f}s")
-            
-            # --- 3. Approach 2: Overall Average Maps ---
-            print(f"\n--> Running Approach 2: Overall Average Maps for Output {out_label}...")
-            t_app2_start = time.time()
-            timers_app2 = {'Plotting': 0.0, 'Save Figure': 0.0}
-            mean_average = np.mean(mean_3d_dynamics, axis=2)  # Shape: (14, 200)
-            
-            save_path = os.path.join(
-                fold_out_dir, 
-                "average", 
-                f"overall_average_map_{out_label}{sample_suffix}.png"
-            )
-            plot_overall_average_map(mean_average, out_label, feature_names, y_tick_indices, y_tick_labels, stride_type_X, save_path, timers=timers_app2)
-            t_app2_total = time.time() - t_app2_start
-            print(f"Completed Overall Average Map for Output {out_label}")
-            print(f"Approach 2 (Plotting & Saving) Time: {t_app2_total:.3f}s")
-            print(f"  Plotting    : {timers_app2['Plotting']:.3f}s")
-            print(f"  Save Figure : {timers_app2['Save Figure']:.3f}s")
-            
-            # --- 4. Approach 3: Phase-wise Smoothed Maps ---
-            print(f"\n--> Running Approach 3: Phase-wise Smoothed Maps for Output {out_label}...")
-            t_app3_start = time.time()
-            timers_app3 = {'Plotting': 0.0, 'Save Figure': 0.0}
-            
-            mean_phase_maps = {}
-            for phase_name, (start_idx, end_idx) in phase_slices.items():
-                if end_idx - start_idx == 0:
-                    mean_phase_maps[phase_name] = np.zeros((in_dim, seq_len))
-                else:
-                    mean_phase_maps[phase_name] = np.mean(mean_3d_dynamics[:, :, start_idx:end_idx], axis=2)
-                    
-            save_path = os.path.join(
-                fold_out_dir, 
-                "phase", 
-                f"phase_wise_smoothed_maps_{out_label}{sample_suffix}.png"
-            )
-            plot_phase_smoothed_maps(mean_phase_maps, out_label, feature_names, y_tick_indices, y_tick_labels, stride_type_X, save_path, timers=timers_app3)
-            t_app3_total = time.time() - t_app3_start
-            print(f"Completed Phase-wise Smoothed Maps for Output {out_label}")
-            print(f"Approach 3 (Plotting & Saving) Time: {t_app3_total:.3f}s")
-            print(f"  Plotting    : {timers_app3['Plotting']:.3f}s")
-            print(f"  Save Figure : {timers_app3['Save Figure']:.3f}s")
-            
-            # --- 5. Approach 4: Feature Importance Bars ---
-            print(f"\n--> Running Approach 4: Feature Importance for Output {out_label}...")
-            t_app4_start = time.time()
-            timers_app4 = {'Plotting': 0.0, 'Save Figure': 0.0}
-            
-            abs_sums = np.sum(mean_3d_dynamics, axis=(1, 2))
-            total_sum = np.sum(abs_sums)
-            rel_pcts = (abs_sums / total_sum) * 100.0 if total_sum > 0 else abs_sums
-            
-            save_path_abs = os.path.join(
-                fold_out_dir, 
-                "importance", 
-                f"feature_importance_absolute_{out_label}{sample_suffix}.png"
-            )
-            save_path_rel = os.path.join(
-                fold_out_dir, 
-                "importance", 
-                f"feature_importance_relative_{out_label}{sample_suffix}.png"
-            )
-            plot_feature_importance_bars(abs_sums, rel_pcts, feature_names, out_label, save_path_abs, save_path_rel, timers=timers_app4)
-            t_app4_total = time.time() - t_app4_start
-            print(f"Completed Feature Importance Maps for Output {out_label}")
-            print(f"Approach 4 (Plotting & Saving) Time: {t_app4_total:.3f}s")
-            print(f"  Plotting    : {timers_app4['Plotting']:.3f}s")
-            print(f"  Save Figure : {timers_app4['Save Figure']:.3f}s")
+            plot_all_gradient_approaches(mean_3d_dynamics, fold_out_dir, out_label, feature_names, in_cols, x_tick_indices, x_tick_labels, y_tick_indices, y_tick_labels, stride_type_X, stride_type_Y, phase_slices, in_dim, seq_len, sample_suffix)
             
         print(f"\nFold {fold} processing complete. Outputs saved to: {fold_out_dir}")
         
+    # Process Global Average if multiple folds
+    if len(folds_to_run) > 1 and args.sample_idx == -1:
+        print("\n========================================")
+        print(" Computing Global Average across ALL Folds")
+        print("========================================")
+        global_out_dir = os.path.join(args.exp_dir, "gradient_plots", "all_folds_average")
+        os.makedirs(os.path.join(global_out_dir, "dynamics"), exist_ok=True)
+        os.makedirs(os.path.join(global_out_dir, "average"), exist_ok=True)
+        os.makedirs(os.path.join(global_out_dir, "phase"), exist_ok=True)
+        os.makedirs(os.path.join(global_out_dir, "importance"), exist_ok=True)
+        
+        total_samples = sum(global_samples_dict.values())
+        print(f"Total samples across all folds: {total_samples}")
+        
+        for o_c in out_cols:
+            out_label = target_names[o_c]
+            global_mean_3d = global_accum[o_c] / total_samples
+            
+            print(f"\n--> Plotting Global Average for Output {out_label}...")
+            plot_all_gradient_approaches(global_mean_3d, global_out_dir, out_label, feature_names, in_cols, x_tick_indices, x_tick_labels, y_tick_indices, y_tick_labels, stride_type_X, stride_type_Y, phase_slices, in_dim, seq_len, "_global_mean")
+            
     print("\nAll tasks completed successfully!")
 
 if __name__ == "__main__":

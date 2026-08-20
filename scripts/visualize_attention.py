@@ -481,13 +481,123 @@ def load_data_and_model(exp_dir, fold, device):
     return model, inputs, preds, targets, meta_df, feature_names, target_names, stride_type_X, stride_type_Y
 
 
-def main():
+
+def plot_all_attention_approaches(agg_maps, agg_rollout_raw, num_samples, output_base, gait_phases, tick_indices_in, tick_labels_in, tick_indices_out, tick_labels_out, start_pct_in, end_pct_in, start_pct_out, end_pct_out, seq_len, boundaries_in, boundaries_out, args, filter_suffix, vmax):
+    num_layers = len(agg_maps)
+    
+    # 1. Calculate and save Layerwise Aggregated Maps, and Aggregate Head-wise Maps
+    layer_averages = []
+    for l_idx in range(num_layers):
+        agg_m = np.mean(np.mean(agg_maps[l_idx], axis=1), axis=0) # (SeqLen, SeqLen)
+        if args.downsample_bins:
+            agg_m = temporal_binning(agg_m, args.downsample_bins)
+        layer_averages.append(agg_m)
+        
+        fig_l, ax_l = plt.subplots(figsize=(6, 5))
+        plot_single_heatmap(
+            ax_l, agg_m, f"Aggregated Layer {l_idx+1} Mean (N={num_samples})",
+            vmin=0.0, vmax=vmax, boundaries_pct=gait_phases,
+            tick_indices_x=tick_indices_in, tick_labels_x=tick_labels_in,
+            tick_indices_y=tick_indices_in, tick_labels_y=tick_labels_in,
+            start_pct_x=start_pct_in, end_pct_x=end_pct_in,
+            start_pct_y=start_pct_in, end_pct_y=end_pct_in
+        )
+        fig_l.savefig(os.path.join(output_base, "layerwise", f"layer{l_idx+1}_mean_aggregate{filter_suffix}.png"), dpi=300, bbox_inches='tight')
+        plt.close(fig_l)
+        
+        nheads = agg_maps[l_idx].shape[1]
+        for h_idx in range(nheads):
+            head_map = np.mean(agg_maps[l_idx][:, h_idx], axis=0)
+            if args.downsample_bins:
+                head_map = temporal_binning(head_map, args.downsample_bins)
+            fig_h, ax_h = plt.subplots(figsize=(6, 5))
+            plot_single_heatmap(
+                ax_h, head_map, f"Aggregated Layer {l_idx+1} Head {h_idx} Mean (N={num_samples})",
+                vmin=0.0, vmax=vmax, boundaries_pct=gait_phases,
+                tick_indices_x=tick_indices_in, tick_labels_x=tick_labels_in,
+                tick_indices_y=tick_indices_in, tick_labels_y=tick_labels_in,
+                start_pct_x=start_pct_in, end_pct_x=end_pct_in,
+                start_pct_y=start_pct_in, end_pct_y=end_pct_in
+            )
+            fig_h.savefig(os.path.join(output_base, "headwise", f"layer{l_idx+1}_head{h_idx}_mean_aggregate{filter_suffix}.png"), dpi=300, bbox_inches='tight')
+            plt.close(fig_h)
+
+    # 2. Aggregated Attention Rollout
+    agg_rollout = agg_rollout_raw
+    if args.downsample_bins:
+        agg_rollout = temporal_binning(agg_rollout_raw, args.downsample_bins)
+        
+    fig_r, ax_r = plt.subplots(figsize=(6, 5))
+    plot_single_heatmap(
+        ax_r, agg_rollout, f"Aggregated Rollout (N={num_samples}, Head: {args.head_idx})",
+        vmin=0.0, vmax=vmax, boundaries_pct=gait_phases,
+        tick_indices_x=tick_indices_out, tick_labels_x=tick_labels_out,
+        tick_indices_y=tick_indices_in, tick_labels_y=tick_labels_in,
+        start_pct_x=start_pct_out, end_pct_x=end_pct_out,
+        start_pct_y=start_pct_in, end_pct_y=end_pct_in
+    )
+    fig_r.savefig(os.path.join(output_base, "rollout", f"rollout_aggregate{filter_suffix}.png"), dpi=300, bbox_inches='tight')
+    plt.close(fig_r)
+
+    # 3. Aggregated Phase Matrix (Rollout-based)
+    p_matrix_agg, phase_names_q, phase_names_k = calculate_phase_matrix(agg_rollout_raw, seq_len, boundaries_q=boundaries_out, boundaries_k=boundaries_in)
+    fig_pm, ax_pm = plt.subplots(figsize=(7, 6))
+    sns.heatmap(
+        p_matrix_agg, cmap="viridis", annot=True, fmt=".4f", ax=ax_pm, square=True,
+        xticklabels=phase_names_q, yticklabels=phase_names_k
+    )
+    ax_pm.set_title(f"Aggregated Phase Matrix (N={num_samples})", fontsize=12, fontweight='bold')
+    ax_pm.set_xlabel("Query (Current Phase / Output)", fontsize=10)
+    ax_pm.set_ylabel("Key (Attended Phase / Input)", fontsize=10)
+    ax_pm.set_xticklabels(phase_names_q, rotation=45)
+    ax_pm.set_yticklabels(phase_names_k, rotation=0)
+    ax_pm.invert_yaxis()
+    fig_pm.savefig(os.path.join(output_base, "phase_matrix", f"phase_matrix_aggregate{filter_suffix}.png"), dpi=300, bbox_inches='tight')
+    plt.close(fig_pm)
+
+    # Save rollout profile aggregate
+    fig_prof, ax_prof = plt.subplots(figsize=(10, 4))
+    mean_prof = np.mean(agg_rollout, axis=0)
+    gait_cycle_pct = pct_array_in if 'pct_array_in' in locals() else np.linspace(start_pct_in, end_pct_in, len(mean_prof))
+    ax_prof.plot(gait_cycle_pct, mean_prof, color="tab:red", linewidth=2.5, label="Key-wise Mean Rollout")
+    ax_prof.set_title(f"Aggregated Attention Profile (N={num_samples})", fontsize=12, fontweight='bold')
+    ax_prof.set_xlabel("Key (% Gait Cycle)", fontsize=10)
+    ax_prof.set_ylabel("Attention Mean", fontsize=10)
+    ax_prof.grid(True, linestyle=":", alpha=0.6)
+    ax_prof.legend(loc="upper right")
+    ax_prof.set_xlim(start_pct_in, end_pct_in)
+    ax_prof.set_xticks(tick_vals_in if 'tick_vals_in' in locals() else [])
+    ax_prof.set_xticklabels(tick_labels_in)
+    fig_prof.savefig(os.path.join(output_base, "rollout", f"rollout_profile_aggregate{filter_suffix}.png"), dpi=300, bbox_inches='tight')
+    plt.close(fig_prof)
+
+    # Save Attention Profile per Layer
+    fig_layers, ax_layers = plt.subplots(figsize=(10, 4))
+    colors = ["tab:blue", "tab:orange", "tab:green", "tab:purple", "tab:brown"]
+    for l_idx in range(num_layers):
+        mean_prof_l = np.mean(layer_averages[l_idx], axis=0)
+        # Assuming variance calculation was skipped for aggregate due to pre-mean cache.
+        ax_layers.plot(gait_cycle_pct, mean_prof_l, label=f"Layer {l_idx + 1}", color=colors[l_idx % len(colors)], linewidth=2.0)
+    ax_layers.set_title(f"Aggregated Attention Profile per Layer (N={num_samples})", fontsize=12, fontweight='bold')
+    ax_layers.set_xlabel("Key (% Gait Cycle)", fontsize=10)
+    ax_layers.set_ylabel("Key-wise Attention Mean", fontsize=10)
+    ax_layers.grid(True, linestyle=":", alpha=0.6)
+    ax_layers.legend(loc="upper right")
+    ax_layers.set_xlim(start_pct_in, end_pct_in)
+    ax_layers.set_xticks(tick_vals_in if 'tick_vals_in' in locals() else [])
+    ax_layers.set_xticklabels(tick_labels_in)
+    fig_layers.savefig(os.path.join(output_base, "rollout", f"layer_attention_profile_aggregate{filter_suffix}.png"), dpi=300, bbox_inches='tight')
+    plt.close(fig_layers)
+
+# =====================================================================
+
+def process_fold(args, fold, device, global_accum=None):
     args = parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     # 1. Load configuration and dataset arrays
     model, inputs, preds, targets, meta_df, feature_names, target_names, stride_type_X, stride_type_Y = load_data_and_model(
-        args.exp_dir, args.fold, device
+        args.exp_dir, fold, device
     )
     
     # Sequence length configurations
@@ -522,7 +632,7 @@ def main():
         print(f"Downsampling active: {seq_len} steps -> {args.downsample_bins} bins (ratio={downsample_ratio})")
 
     # 4. Initialize output subdirectories
-    output_base = args.output_dir if args.output_dir else os.path.join(args.exp_dir, "attention_plots", f"fold{args.fold}")
+    output_base = args.output_dir if args.output_dir else os.path.join(args.exp_dir, "attention_plots", f"fold{fold}")
     subdirs = ["layerwise", "headwise", "rollout", "phase_matrix", "cache"]
     for sd in subdirs:
         os.makedirs(os.path.join(output_base, sd), exist_ok=True)
@@ -791,200 +901,81 @@ def main():
         num_samples = len(agg_inputs)
         num_layers = len(agg_maps)
         
-        # 1. Calculate and save Layerwise Aggregated Maps, and Aggregate Head-wise Maps
-        layer_averages = []
-        for l_idx in range(num_layers):
-            # Mean across batch and heads
-            agg_m = np.mean(np.mean(agg_maps[l_idx], axis=1), axis=0) # (SeqLen, SeqLen)
-            if args.downsample_bins:
-                agg_m = temporal_binning(agg_m, args.downsample_bins)
-            layer_averages.append(agg_m)
+        # Accumulate globally if requested
+        if global_accum is not None:
+            if global_accum['agg_maps'] is None:
+                global_accum['agg_maps'] = [m * num_samples for m in agg_maps]
+                global_accum['agg_rollout_raw'] = agg_rollout_raw * num_samples
+                global_accum['vmax_sum'] = vmax * num_samples if vmax is not None else 0
+            else:
+                for i in range(num_layers):
+                    global_accum['agg_maps'][i] += agg_maps[i] * num_samples
+                global_accum['agg_rollout_raw'] += agg_rollout_raw * num_samples
+                global_accum['vmax_sum'] += vmax * num_samples if vmax is not None else 0
+            global_accum['num_samples'] += num_samples
             
-            # Save aggregated layerwise heatmap individual PNG
-            fig_l, ax_l = plt.subplots(figsize=(6, 5))
-            plot_single_heatmap(
-                ax_l, agg_m, f"Aggregated Layer {l_idx+1} Mean (N={num_samples})",
-                vmin=0.0, vmax=vmax, boundaries_pct=gait_phases,
-                tick_indices_x=tick_indices_in, tick_labels_x=tick_labels_in,
-                tick_indices_y=tick_indices_in, tick_labels_y=tick_labels_in,
-                start_pct_x=start_pct_in, end_pct_x=end_pct_in,
-                start_pct_y=start_pct_in, end_pct_y=end_pct_in
-            )
-            fig_l.savefig(
-                os.path.join(output_base, "layerwise", f"layer{l_idx+1}_mean_aggregate.png"),
-                dpi=300, bbox_inches='tight'
-            )
-            plt.close(fig_l)
-            
-            # Save aggregate head-wise mean heatmaps (layer x head mean aggregate)
-            # shape of agg_maps[l_idx]: (Batch, nhead, SeqLen, SeqLen)
-            nheads = agg_maps[l_idx].shape[1]
-            for h_idx in range(nheads):
-                head_map = np.mean(agg_maps[l_idx][:, h_idx], axis=0) # (SeqLen, SeqLen)
-                if args.downsample_bins:
-                    head_map = temporal_binning(head_map, args.downsample_bins)
-                    
-                fig_h, ax_h = plt.subplots(figsize=(6, 5))
-                plot_single_heatmap(
-                    ax_h, head_map, f"Aggregated Layer {l_idx+1} Head {h_idx} Mean (N={num_samples})",
-                    vmin=0.0, vmax=vmax, boundaries_pct=gait_phases,
-                    tick_indices_x=tick_indices_in, tick_labels_x=tick_labels_in,
-                    tick_indices_y=tick_indices_in, tick_labels_y=tick_labels_in,
-                    start_pct_x=start_pct_in, end_pct_x=end_pct_in,
-                    start_pct_y=start_pct_in, end_pct_y=end_pct_in
-                )
-                fig_h.savefig(
-                    os.path.join(output_base, "headwise", f"layer{l_idx+1}_head{h_idx}_mean_aggregate.png"),
-                    dpi=300, bbox_inches='tight'
-                )
-                plt.close(fig_h)
+        plot_all_attention_approaches(agg_maps, agg_rollout_raw, num_samples, output_base, gait_phases, tick_indices_in, tick_labels_in, tick_indices_out, tick_labels_out, start_pct_in, end_pct_in, start_pct_out, end_pct_out, seq_len, boundaries_in, boundaries_out, args, filter_suffix, vmax)
 
-        # 2. Aggregated Attention Rollout
-        rollout_batch = calculate_attention_rollout(agg_maps, args.head_idx) # (Batch, SeqLen, SeqLen)
-        agg_rollout_raw = np.mean(rollout_batch, axis=0) # Raw resolution (SeqLen, SeqLen)
+    # 8. Return values needed for global average if multiple folds
+    return gait_phases, tick_indices_in, tick_labels_in, tick_indices_out, tick_labels_out, start_pct_in, end_pct_in, start_pct_out, end_pct_out, seq_len, boundaries_in, boundaries_out, filter_suffix
+
+
+def main():
+    args = parse_args()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    if args.fold.lower() == "all":
+        import glob
+        pattern = os.path.join(args.exp_dir, "inputs_fold*.npy")
+        fold_files = sorted(glob.glob(pattern))
+        if len(fold_files) == 0:
+            raise FileNotFoundError(f"No fold files found matching {pattern}")
+        folds_to_run = []
+        for file_path in fold_files:
+            basename = os.path.basename(file_path)
+            num_str = "".join([c for c in basename if c.isdigit()])
+            if num_str:
+                folds_to_run.append(int(num_str))
+        print(f"Detected folds to process: {folds_to_run}")
+    else:
+        folds_to_run = [int(args.fold)]
         
-        agg_rollout = agg_rollout_raw
-        if args.downsample_bins:
-            agg_rollout = temporal_binning(agg_rollout_raw, args.downsample_bins)
-            
-        # Save rollout heatmap
-        fig_r, ax_r = plt.subplots(figsize=(6, 5))
-        plot_single_heatmap(
-            ax_r, agg_rollout, f"Aggregated Rollout (N={num_samples}, Head: {args.head_idx})",
-            vmin=0.0, vmax=vmax, boundaries_pct=gait_phases,
-            tick_indices_x=tick_indices_out, tick_labels_x=tick_labels_out,
-            tick_indices_y=tick_indices_in, tick_labels_y=tick_labels_in,
-            start_pct_x=start_pct_out, end_pct_x=end_pct_out,
-            start_pct_y=start_pct_in, end_pct_y=end_pct_in
-        )
+    global_accum = {'agg_maps': None, 'agg_rollout_raw': None, 'num_samples': 0, 'vmax_sum': 0}
+    last_vars = None
+    
+    for fold in folds_to_run:
+        print(f"\n========================================")
+        print(f" Processing Fold {fold} / {len(folds_to_run)}")
+        print(f"========================================")
+        last_vars = process_fold(args, fold, device, global_accum if args.mode == "aggregate" else None)
         
-        filter_suffix = ""
-        if args.subject_name:
-            filter_suffix += f"_{args.subject_name}"
-        if args.condition_name:
-            filter_suffix += f"_{args.condition_name}"
+    if len(folds_to_run) > 1 and args.mode == "aggregate":
+        print("\n========================================")
+        print(" Computing Global Average across ALL Folds")
+        print("========================================")
+        global_out_dir = os.path.join(args.exp_dir, "attention_plots", "all_folds_average")
+        subdirs = ["layerwise", "headwise", "rollout", "phase_matrix"]
+        for sd in subdirs:
+            os.makedirs(os.path.join(global_out_dir, sd), exist_ok=True)
             
-        fig_r.savefig(
-            os.path.join(output_base, "rollout", f"rollout_aggregate{filter_suffix}.png"),
-            dpi=300, bbox_inches='tight'
-        )
-        plt.close(fig_r)
-
-        # 3. Aggregated Phase Matrix (Rollout-based)
-        p_matrix_agg, phase_names_q, phase_names_k = calculate_phase_matrix(agg_rollout_raw, seq_len, boundaries_q=boundaries_out, boundaries_k=boundaries_in)
+        num_samples = global_accum['num_samples']
+        global_agg_maps = [m / num_samples for m in global_accum['agg_maps']]
+        global_agg_rollout = global_accum['agg_rollout_raw'] / num_samples
+        global_vmax = global_accum['vmax_sum'] / num_samples if global_accum['vmax_sum'] > 0 else None
         
-        fig_pm, ax_pm = plt.subplots(figsize=(7, 6))
-        sns.heatmap(
-            p_matrix_agg, 
-            cmap="viridis", 
-            annot=True, 
-            fmt=".4f", 
-            ax=ax_pm, 
-            square=True,
-            xticklabels=phase_names_q,
-            yticklabels=phase_names_k
-        )
-        ax_pm.set_title(f"Aggregated Phase Matrix (N={num_samples})", fontsize=12, fontweight='bold')
-        ax_pm.set_xlabel("Query (Current Phase / Output)", fontsize=10)
-        ax_pm.set_ylabel("Key (Attended Phase / Input)", fontsize=10)
-        ax_pm.set_xticklabels(phase_names_q, rotation=45)
-        ax_pm.set_yticklabels(phase_names_k, rotation=0)
-        ax_pm.invert_yaxis()
-        fig_pm.savefig(
-            os.path.join(output_base, "phase_matrix", f"phase_matrix_aggregate.png"),
-            dpi=300, bbox_inches='tight'
-        )
-        plt.close(fig_pm)
-
+        gait_phases, tick_indices_in, tick_labels_in, tick_indices_out, tick_labels_out, start_pct_in, end_pct_in, start_pct_out, end_pct_out, seq_len, boundaries_in, boundaries_out, filter_suffix = last_vars
         
-        # Save rollout profile aggregate (Key-wise mean rollout profile)
-        transposed_rollout = np.transpose(rollout_batch, (0, 2, 1)) # (Batch, Key, Query)
-        batch_key_profiles = np.mean(transposed_rollout, axis=2) # (Batch, Key)
+        plot_all_attention_approaches(global_agg_maps, global_agg_rollout, num_samples, global_out_dir, gait_phases, tick_indices_in, tick_labels_in, tick_indices_out, tick_labels_out, start_pct_in, end_pct_in, start_pct_out, end_pct_out, seq_len, boundaries_in, boundaries_out, args, filter_suffix, global_vmax)
+        print(f"\n✅ Global average plots saved to: {global_out_dir}")
         
-        if args.downsample_bins:
-            bin_size = seq_len // args.downsample_bins
-            batch_key_profiles = batch_key_profiles.reshape(num_samples, args.downsample_bins, bin_size).mean(axis=2)
-            
-        mean_prof = np.mean(batch_key_profiles, axis=0)
-        std_prof = np.std(batch_key_profiles, axis=0)
-        gait_cycle_pct = pct_array_in
-        
-        fig_prof, ax_prof = plt.subplots(figsize=(10, 4))
-        ax_prof.plot(gait_cycle_pct, mean_prof, color="tab:blue", linewidth=2.0, label="Global Mean Rollout Profile")
-        ax_prof.fill_between(
-            gait_cycle_pct,
-            np.maximum(0, mean_prof - std_prof),
-            mean_prof + std_prof,
-            color="tab:blue",
-            alpha=0.2
-        )
-        ax_prof.set_title("Global Attention Rollout Profile", fontsize=12, fontweight='bold')
-        ax_prof.set_xlabel("Key (% Gait Cycle)", fontsize=10)
-        ax_prof.set_ylabel("Rollout Weight", fontsize=10)
-        ax_prof.grid(True, linestyle=":", alpha=0.6)
-        ax_prof.legend()
-        ax_prof.set_xlim(start_pct_in, end_pct_in)
-        ax_prof.set_xticks(tick_vals_in)
-        ax_prof.set_xticklabels(tick_labels_in)
-        fig_prof.savefig(
-            os.path.join(output_base, "rollout", f"rollout_profile_aggregate{filter_suffix}.png"),
-            dpi=300, bbox_inches='tight'
-        )
-        plt.close(fig_prof)
-
-        # Save Attention Profile per Layer (Aggregate mode standalone)
-        fig_layers, ax_layers = plt.subplots(figsize=(10, 4))
-        colors = ["tab:blue", "tab:orange", "tab:green"]
-        for l_idx in range(num_layers):
-            h_mean = np.mean(agg_maps[l_idx], axis=1) # (Batch, SeqLen, SeqLen)
-            profiles = np.mean(h_mean, axis=1) # (Batch, SeqLen)
-            
-            if args.downsample_bins:
-                bin_size = seq_len // args.downsample_bins
-                profiles = profiles.reshape(num_samples, args.downsample_bins, bin_size).mean(axis=2)
-                
-            mean_prof_l = np.mean(profiles, axis=0)
-            std_prof_l = np.std(profiles, axis=0)
-            gait_cycle_pct_l = np.linspace(0, 100, len(mean_prof_l))
-            
-            ax_layers.plot(
-                gait_cycle_pct_l, mean_prof_l,
-                label=f"Layer {l_idx + 1}",
-                color=colors[l_idx % len(colors)],
-                linewidth=2.0
-            )
-            ax_layers.fill_between(
-                gait_cycle_pct_l,
-                np.maximum(0, mean_prof_l - std_prof_l),
-                mean_prof_l + std_prof_l,
-                color=colors[l_idx % len(colors)],
-                alpha=0.1
-            )
-            
-        ax_layers.set_title("Aggregated Attention Profile per Layer (Mean ± Std)", fontsize=12, fontweight='bold')
-        ax_layers.set_xlabel("Key (% Gait Cycle)", fontsize=10)
-        ax_layers.set_ylabel("Key-wise Attention Mean", fontsize=10)
-        ax_layers.grid(True, linestyle=":", alpha=0.6)
-        ax_layers.legend(loc="upper right")
-        ax_layers.set_xlim(start_pct_in, end_pct_in)
-        ax_layers.set_xticks(tick_vals_in)
-        ax_layers.set_xticklabels(tick_labels_in)
-        fig_layers.savefig(
-            os.path.join(output_base, "rollout", "layer_attention_profile_aggregate.png"),
-            dpi=300, bbox_inches='tight'
-        )
-        plt.close(fig_layers)
-
-
-
-    # 8. Interactive Show Check
     if not args.no_show:
         try:
             plt.show()
         except Exception:
             print("No graphic display detected or backend not available. Plots were saved to file.")
             
-    print(f"\n✅ All attention visualization tasks completed! Plots saved to: {output_base}")
+    print(f"\n✅ All attention visualization tasks completed!")
+
 
 
 if __name__ == "__main__":
