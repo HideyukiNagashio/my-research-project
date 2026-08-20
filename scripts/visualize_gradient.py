@@ -919,13 +919,16 @@ def main():
                 'Other': 0.0,
                 'forward_calls': 0
             }
-            for idx in indices_to_avg:
-                sample_x = torch.tensor(inputs[idx:idx+1], dtype=torch.float32).to(device)
-                sample_x.requires_grad_(True)
+            batch_size = 128
+            for b_start in range(0, len(indices_to_avg), batch_size):
+                batch_indices = indices_to_avg[b_start:b_start+batch_size]
+                batch_x = torch.tensor(inputs[batch_indices], dtype=torch.float32).to(device)
+                batch_x.requires_grad_(True)
                 
-                # Compute all gradients at once
-                dynamics_3d = compute_dynamics_map_all_features(model, sample_x, out_col=o_c, timers=timers_calc)
-                accum_3d_dynamics += dynamics_3d
+                # Compute all gradients for the entire batch at once
+                # Returns the sum of absolute gradients across the batch
+                batch_dynamics_sum = compute_dynamics_map_all_features(model, batch_x, out_col=o_c, timers=timers_calc)
+                accum_3d_dynamics += batch_dynamics_sum
                 
             mean_3d_dynamics = accum_3d_dynamics / len(indices_to_avg)
             t_calc_total = time.time() - t_calc_start
