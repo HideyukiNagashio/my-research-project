@@ -37,10 +37,9 @@ def parse_args():
     )
     parser.add_argument(
         "--fold",
-        type=int,
-        default=1,
-        choices=[1, 2, 3, 4, 5, 6],
-        help="Fold number to visualize (1-6)"
+        type=str,
+        default="all",
+        help="Fold index to visualize (1-6, or 'all' to batch process all folds dynamically)"
     )
     parser.add_argument(
         "--mode",
