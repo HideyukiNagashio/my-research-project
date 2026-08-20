@@ -521,34 +521,27 @@ def main():
         downsample_ratio = seq_len / args.downsample_bins
         print(f"Downsampling active: {seq_len} steps -> {args.downsample_bins} bins (ratio={downsample_ratio})")
 
-    # 4. Extract raw attention maps (Batch, nhead, SeqLen, SeqLen)
-    inputs_tensor = torch.tensor(inputs, dtype=torch.float32)
-    print("Extracting attention weights (running model forward pass)...")
-    _, attention_maps = extract_attention_maps(model, inputs_tensor, device)
-    
-    # 5. Compute global attention parameters (vmax)
-    global_vmax = compute_global_vmax(attention_maps)
-    print(f"Computed Global Attention vmax (99th percentile): {global_vmax:.5f}")
-    vmax = global_vmax if args.shared_cmap else None
-    
-    # 6. Initialize output subdirectories
+    # 4. Initialize output subdirectories
     output_base = args.output_dir if args.output_dir else os.path.join(args.exp_dir, "attention_plots", f"fold{args.fold}")
-    subdirs = ["layerwise", "headwise", "rollout", "phase_matrix"]
+    subdirs = ["layerwise", "headwise", "rollout", "phase_matrix", "cache"]
     for sd in subdirs:
         os.makedirs(os.path.join(output_base, sd), exist_ok=True)
         
-    # 7. Apply filtering by subject and/or condition
+    # 5. Apply filtering by subject and/or condition
     sample_indices = np.arange(len(inputs))
     filter_desc = ""
+    filter_hash = "all"
     
     if meta_df is not None:
         filtered_mask = np.ones(len(meta_df), dtype=bool)
         if args.subject_name:
             filtered_mask &= (meta_df['subject_name'] == args.subject_name)
             filter_desc += f"Subject: {args.subject_name} "
+            filter_hash += f"_{args.subject_name}"
         if args.condition_name:
             filtered_mask &= (meta_df['condition_name'] == args.condition_name)
             filter_desc += f"Condition: {args.condition_name}"
+            filter_hash += f"_{args.condition_name}"
             
         filtered_indices = np.where(filtered_mask)[0]
         if len(filtered_indices) == 0:
@@ -559,19 +552,76 @@ def main():
             if args.mode == "single" and args.sample_idx not in sample_indices:
                 args.sample_idx = sample_indices[0]
                 print(f"Selected sample_idx {args.sample_idx} to match filter criteria.")
+                
+    # 6. Extract raw attention maps & Rollout (with caching)
+    cache_dir = os.path.join(output_base, "cache")
+    if args.mode == "aggregate":
+        cache_maps_file = os.path.join(cache_dir, f"agg_maps_{filter_hash}.npy")
+        cache_rollout_file = os.path.join(cache_dir, f"agg_rollout_{filter_hash}.npy")
+    else:
+        cache_maps_file = os.path.join(cache_dir, f"sample_{args.sample_idx}_maps.npy")
+        cache_rollout_file = os.path.join(cache_dir, f"sample_{args.sample_idx}_rollout.npy")
+        
+    if not args.force_recalc and os.path.exists(cache_maps_file) and os.path.exists(cache_rollout_file):
+        print(f"\n[Cache] Loading precomputed attention maps and rollout from {cache_dir}...")
+        if args.mode == "aggregate":
+            agg_maps_arr = np.load(cache_maps_file)
+            agg_maps = [agg_maps_arr[i] for i in range(agg_maps_arr.shape[0])]
+            agg_rollout_raw = np.load(cache_rollout_file)
+            
+            # Dummy variables since they are skipped
+            attention_maps = None 
+            rollout_batch = None
+            global_vmax = 0.05  # Approximate if cached
+            vmax = global_vmax if args.shared_cmap else None
+        else:
+            sample_maps_arr = np.load(cache_maps_file)
+            attention_maps = [np.expand_dims(sample_maps_arr[i], axis=0) for i in range(sample_maps_arr.shape[0])]
+            rollout_batch = np.expand_dims(np.load(cache_rollout_file), axis=0)
+            global_vmax = np.percentile(sample_maps_arr, 99)
+            vmax = global_vmax if args.shared_cmap else None
+            
+    else:
+        print("Extracting attention weights (running model forward pass)...")
+        if args.mode == "aggregate":
+            inputs_tensor = torch.tensor(inputs[sample_indices], dtype=torch.float32).to(device)
+        else:
+            inputs_tensor = torch.tensor(inputs[args.sample_idx:args.sample_idx+1], dtype=torch.float32).to(device)
+            
+        _, attention_maps = extract_attention_maps(model, inputs_tensor, device)
+        rollout_batch = compute_rollout_batch(attention_maps, head_idx="mean")
+        
+        if args.mode == "aggregate":
+            agg_maps = [np.mean(layer_map, axis=0) for layer_map in attention_maps]
+            agg_rollout_raw = np.mean(rollout_batch, axis=0)
+            
+            np.save(cache_maps_file, np.array(agg_maps))
+            np.save(cache_rollout_file, agg_rollout_raw)
+            print(f"[Cache] Saved aggregated maps to {cache_dir}")
+            
+            global_vmax = compute_global_vmax(attention_maps)
+            print(f"Computed Global Attention vmax (99th percentile): {global_vmax:.5f}")
+            vmax = global_vmax if args.shared_cmap else None
+        else:
+            sample_maps = [layer_map[0] for layer_map in attention_maps]
+            np.save(cache_maps_file, np.array(sample_maps))
+            np.save(cache_rollout_file, rollout_batch[0])
+            print(f"[Cache] Saved single sample maps to {cache_dir}")
+            
+            global_vmax = compute_global_vmax(attention_maps)
+            print(f"Computed Global Attention vmax (99th percentile): {global_vmax:.5f}")
+            vmax = global_vmax if args.shared_cmap else None
 
     # ==========================================
     # Run Mode executions
     # ==========================================
     
     if args.mode == "single":
-        s_idx = args.sample_idx
-        if s_idx >= len(inputs) or s_idx < 0:
-            print(f"Error: sample_idx {s_idx} is out of bounds (0 to {len(inputs) - 1})")
-            sys.exit(1)
-            
-        sub_name = meta_df.loc[s_idx, 'subject_name'] if meta_df is not None else f"sub{s_idx}"
-        cond_name = meta_df.loc[s_idx, 'condition_name'] if meta_df is not None else "cond"
+        orig_s_idx = args.sample_idx
+        s_idx = 0 # since we sliced input_tensor to 1 sample during computation
+        
+        sub_name = meta_df.loc[orig_s_idx, 'subject_name'] if meta_df is not None else f"sub{orig_s_idx}"
+        cond_name = meta_df.loc[orig_s_idx, 'condition_name'] if meta_df is not None else "cond"
         
         # ------------------------------------------
         # A. Process Maps for Sample
@@ -595,7 +645,7 @@ def main():
             # Save layerwise average individual PNG
             fig_l, ax_l = plt.subplots(figsize=(6, 5))
             plot_single_heatmap(
-                ax_l, l_avg, f"Layer {l_idx+1} Mean (Sample {s_idx})",
+                ax_l, l_avg, f"Layer {l_idx+1} Mean (Sample {orig_s_idx})",
                 vmin=0.0, vmax=vmax, boundaries_pct=gait_phases,
                 tick_indices_x=tick_indices_in, tick_labels_x=tick_labels_in,
                 tick_indices_y=tick_indices_in, tick_labels_y=tick_labels_in,
@@ -617,7 +667,7 @@ def main():
                     
                 fig_h, ax_h = plt.subplots(figsize=(6, 5))
                 plot_single_heatmap(
-                    ax_h, h_map, f"Layer {l_idx+1} Head {h_idx} (Sample {s_idx})",
+                    ax_h, h_map, f"Layer {l_idx+1} Head {h_idx} (Sample {orig_s_idx})",
                     vmin=0.0, vmax=vmax, boundaries_pct=gait_phases,
                     tick_indices=tick_indices, tick_labels=tick_labels, start_pct=start_pct, end_pct=end_pct
                 )
@@ -640,7 +690,7 @@ def main():
         # Save Rollout Heatmap
         fig_r, ax_r = plt.subplots(figsize=(6, 5))
         plot_single_heatmap(
-            ax_r, s_rollout, f"Attention Rollout (Sample {s_idx}, Head: {args.head_idx})",
+            ax_r, s_rollout, f"Attention Rollout (Sample {orig_s_idx}, Head: {args.head_idx})",
             vmin=0.0, vmax=vmax, boundaries_pct=gait_phases,
             tick_indices=tick_indices, tick_labels=tick_labels, start_pct=start_pct, end_pct=end_pct
         )
@@ -672,7 +722,7 @@ def main():
             xticklabels=phase_names_q,
             yticklabels=phase_names_k
         )
-        ax_pm.set_title(f"Phase-to-Phase Attention Matrix (Sample {s_idx})", fontsize=12, fontweight='bold')
+        ax_pm.set_title(f"Phase-to-Phase Attention Matrix (Sample {orig_s_idx})", fontsize=12, fontweight='bold')
         ax_pm.set_xlabel("Query (Current Phase / Output)", fontsize=10)
         ax_pm.set_ylabel("Key (Attended Phase / Input)", fontsize=10)
         ax_pm.set_xticklabels(phase_names_q, rotation=45)

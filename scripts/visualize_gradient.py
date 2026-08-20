@@ -379,8 +379,65 @@ def plot_phase_smoothed_maps(phase_maps, out_label, feature_names, tick_indices,
     plt.close()
 
 
+
+def plot_feature_importance_bars(abs_sums, rel_pcts, feature_names, out_label, save_path_abs=None, save_path_rel=None, timers=None):
+    """Plots and saves separate horizontal bar charts for absolute sum and relative % feature importance."""
+    y_pos = np.arange(len(feature_names))
+    
+    # --- 1. Absolute Sum Plot ---
+    if timers is not None:
+        t_plot_start = time.time()
+    fig1, ax1 = plt.subplots(figsize=(8, 8))
+    ax1.barh(y_pos, abs_sums, color='skyblue')
+    ax1.set_yticks(y_pos)
+    ax1.set_yticklabels(feature_names)
+    ax1.invert_yaxis()
+    ax1.set_xlabel('Absolute Gradient Sum')
+    ax1.set_title(f"Feature Absolute Importance ({out_label})", fontsize=14, fontweight='bold')
+    ax1.grid(axis='x', linestyle='--', alpha=0.7)
+    plt.tight_layout()
+    if timers is not None:
+        timers['Plotting'] += time.time() - t_plot_start
+        
+    if save_path_abs:
+        if timers is not None:
+            t_save_start = time.time()
+        os.makedirs(os.path.dirname(save_path_abs), exist_ok=True)
+        fig1.savefig(save_path_abs, dpi=150)
+        if timers is not None:
+            timers['Save Figure'] += time.time() - t_save_start
+    plt.close(fig1)
+    
+    # --- 2. Relative Percentage Plot ---
+    if timers is not None:
+        t_plot_start = time.time()
+    fig2, ax2 = plt.subplots(figsize=(8, 8))
+    ax2.barh(y_pos, rel_pcts, color='salmon')
+    ax2.set_yticks(y_pos)
+    ax2.set_yticklabels(feature_names)
+    ax2.invert_yaxis()
+    ax2.set_xlabel('Relative Importance (%)')
+    ax2.set_title(f"Feature Relative Importance % ({out_label})", fontsize=14, fontweight='bold')
+    ax2.grid(axis='x', linestyle='--', alpha=0.7)
+    for i, v in enumerate(rel_pcts):
+        ax2.text(v + 0.5, i, f"{v:.1f}%", va='center', fontsize=9)
+    plt.tight_layout()
+    if timers is not None:
+        timers['Plotting'] += time.time() - t_plot_start
+        
+    if save_path_rel:
+        if timers is not None:
+            t_save_start = time.time()
+        os.makedirs(os.path.dirname(save_path_rel), exist_ok=True)
+        fig2.savefig(save_path_rel, dpi=150)
+        if timers is not None:
+            timers['Save Figure'] += time.time() - t_save_start
+    plt.close(fig2)
+
+
 # =====================================================================
 # Model and Data Loader
+
 # =====================================================================
 
 def load_data_and_model(exp_dir, fold, device):
@@ -689,6 +746,19 @@ def main():
             plot_phase_smoothed_maps(phase_maps, target_names[o_c], feature_names, y_tick_indices, y_tick_labels, stride_type_X, save_path=save_path)
             print(f"Saved: {save_path}")
             
+        # Approach 4: Feature Importance
+        print("\n--- Approach 4: Computing Feature Importance (Demo) ---")
+        for o_c in demo_out_cols:
+            all_dynamics = compute_dynamics_map_all_features(model, input_data, out_col=o_c)
+            abs_sums = np.sum(all_dynamics, axis=(1, 2))
+            total_sum = np.sum(abs_sums)
+            rel_pcts = (abs_sums / total_sum) * 100.0 if total_sum > 0 else abs_sums
+            
+            save_path_abs = os.path.join(fold_out_dir, "importance", f"feature_importance_absolute_{target_names[o_c]}.png")
+            save_path_rel = os.path.join(fold_out_dir, "importance", f"feature_importance_relative_{target_names[o_c]}.png")
+            plot_feature_importance_bars(abs_sums, rel_pcts, feature_names, target_names[o_c], save_path_abs, save_path_rel)
+            print(f"Saved: {save_path_abs} and {save_path_rel}")
+            
         print(f"\nDemo run completed successfully. View plots in: {demo_dir}")
         return
         
@@ -760,6 +830,7 @@ def main():
         os.makedirs(os.path.join(fold_out_dir, "dynamics"), exist_ok=True)
         os.makedirs(os.path.join(fold_out_dir, "average"), exist_ok=True)
         os.makedirs(os.path.join(fold_out_dir, "phase"), exist_ok=True)
+        os.makedirs(os.path.join(fold_out_dir, "importance"), exist_ok=True)
         
         phase_slices = get_phase_indices(seq_len, start_pct_out, end_pct_out)
         
@@ -858,6 +929,32 @@ def main():
             print(f"Approach 3 (Plotting & Saving) Time: {t_app3_total:.3f}s")
             print(f"  Plotting    : {timers_app3['Plotting']:.3f}s")
             print(f"  Save Figure : {timers_app3['Save Figure']:.3f}s")
+            
+            # --- 5. Approach 4: Feature Importance Bars ---
+            print(f"\n--> Running Approach 4: Feature Importance for Output {out_label}...")
+            t_app4_start = time.time()
+            timers_app4 = {'Plotting': 0.0, 'Save Figure': 0.0}
+            
+            abs_sums = np.sum(mean_3d_dynamics, axis=(1, 2))
+            total_sum = np.sum(abs_sums)
+            rel_pcts = (abs_sums / total_sum) * 100.0 if total_sum > 0 else abs_sums
+            
+            save_path_abs = os.path.join(
+                fold_out_dir, 
+                "importance", 
+                f"feature_importance_absolute_{out_label}{sample_suffix}.png"
+            )
+            save_path_rel = os.path.join(
+                fold_out_dir, 
+                "importance", 
+                f"feature_importance_relative_{out_label}{sample_suffix}.png"
+            )
+            plot_feature_importance_bars(abs_sums, rel_pcts, feature_names, out_label, save_path_abs, save_path_rel, timers=timers_app4)
+            t_app4_total = time.time() - t_app4_start
+            print(f"Completed Feature Importance Maps for Output {out_label}")
+            print(f"Approach 4 (Plotting & Saving) Time: {t_app4_total:.3f}s")
+            print(f"  Plotting    : {timers_app4['Plotting']:.3f}s")
+            print(f"  Save Figure : {timers_app4['Save Figure']:.3f}s")
             
         print(f"\nFold {fold} processing complete. Outputs saved to: {fold_out_dir}")
         
