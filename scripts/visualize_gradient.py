@@ -679,6 +679,11 @@ def parse_args():
         default="all",
         help="Input feature index for Approach 1 dynamics map (or 'all' to process all input features)"
     )
+    parser.add_argument(
+        "--force_recalc",
+        action="store_true",
+        help="Force recalculation instead of using cached .npy files if they exist"
+    )
     return parser.parse_args()
 
 
@@ -897,10 +902,13 @@ def main():
             
         # Create output folders for this fold
         fold_out_dir = os.path.join(args.exp_dir, "gradient_plots", f"fold{fold}")
+        cache_dir = os.path.join(args.exp_dir, "gradient_plots", "cache", f"fold{fold}")
+        
         os.makedirs(os.path.join(fold_out_dir, "dynamics"), exist_ok=True)
         os.makedirs(os.path.join(fold_out_dir, "average"), exist_ok=True)
         os.makedirs(os.path.join(fold_out_dir, "phase"), exist_ok=True)
         os.makedirs(os.path.join(fold_out_dir, "importance"), exist_ok=True)
+        os.makedirs(cache_dir, exist_ok=True)
         
         phase_slices = get_phase_indices(seq_len, start_pct_out, end_pct_out)
         
@@ -908,38 +916,48 @@ def main():
         for o_c in out_cols:
             out_label = target_names[o_c]
             
-            # --- 1. Compute and accumulate the 3D dynamics maps across all samples ---
-            accum_3d_dynamics = np.zeros((in_dim, seq_len, seq_len))
+            cache_file = os.path.join(cache_dir, f"mean_3d_dynamics_{out_label}{sample_suffix}.npy")
             
-            t_calc_start = time.time()
-            timers_calc = {
-                'Forward': 0.0,
-                'Backward': 0.0,
-                'Aggregation': 0.0,
-                'Other': 0.0,
-                'forward_calls': 0
-            }
-            batch_size = 128
-            for b_start in range(0, len(indices_to_avg), batch_size):
-                batch_indices = indices_to_avg[b_start:b_start+batch_size]
-                batch_x = torch.tensor(inputs[batch_indices], dtype=torch.float32).to(device)
-                batch_x.requires_grad_(True)
+            if os.path.exists(cache_file) and not getattr(args, 'force_recalc', False):
+                print(f"Loading cached dynamics map for Output {out_label} from {cache_file}")
+                mean_3d_dynamics = np.load(cache_file)
+            else:
+                # --- 1. Compute and accumulate the 3D dynamics maps across all samples ---
+                accum_3d_dynamics = np.zeros((in_dim, seq_len, seq_len))
                 
-                # Compute all gradients for the entire batch at once
-                # Returns the sum of absolute gradients across the batch
-                batch_dynamics_sum = compute_dynamics_map_all_features(model, batch_x, out_col=o_c, timers=timers_calc)
-                accum_3d_dynamics += batch_dynamics_sum
+                t_calc_start = time.time()
+                timers_calc = {
+                    'Forward': 0.0,
+                    'Backward': 0.0,
+                    'Aggregation': 0.0,
+                    'Other': 0.0,
+                    'forward_calls': 0
+                }
+                batch_size = 128
+                for b_start in range(0, len(indices_to_avg), batch_size):
+                    batch_indices = indices_to_avg[b_start:b_start+batch_size]
+                    batch_x = torch.tensor(inputs[batch_indices], dtype=torch.float32).to(device)
+                    batch_x.requires_grad_(True)
+                    
+                    # Compute all gradients for the entire batch at once
+                    # Returns the sum of absolute gradients across the batch
+                    batch_dynamics_sum = compute_dynamics_map_all_features(model, batch_x, out_col=o_c, timers=timers_calc)
+                    accum_3d_dynamics += batch_dynamics_sum
+                    
+                mean_3d_dynamics = accum_3d_dynamics / len(indices_to_avg)
+                t_calc_total = time.time() - t_calc_start
                 
-            mean_3d_dynamics = accum_3d_dynamics / len(indices_to_avg)
-            t_calc_total = time.time() - t_calc_start
-            
-            print(f"\n[Profile: Gradient Computation for Output {out_label}]")
-            print(f"  Forward          : {timers_calc['Forward']:.3f}s")
-            print(f"  Backward         : {timers_calc['Backward']:.3f}s")
-            print(f"  Aggregation      : {timers_calc['Aggregation']:.3f}s")
-            print(f"  Other            : {timers_calc['Other']:.3f}s")
-            print(f"  Total            : {t_calc_total:.3f}s")
-            print(f"  Forward calls    : {timers_calc['forward_calls']}")
+                # Save to cache
+                np.save(cache_file, mean_3d_dynamics)
+                print(f"[Cache] Saved dynamics map to {cache_file}")
+                
+                print(f"\n[Profile: Gradient Computation for Output {out_label}]")
+                print(f"  Forward          : {timers_calc['Forward']:.3f}s")
+                print(f"  Backward         : {timers_calc['Backward']:.3f}s")
+                print(f"  Aggregation      : {timers_calc['Aggregation']:.3f}s")
+                print(f"  Other            : {timers_calc['Other']:.3f}s")
+                print(f"  Total            : {t_calc_total:.3f}s")
+                print(f"  Forward calls    : {timers_calc['forward_calls']}")
             
             # Accumulate globally
             if args.sample_idx == -1:
