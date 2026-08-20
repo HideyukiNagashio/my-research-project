@@ -671,6 +671,8 @@ def process_fold(args, fold, device, global_accum=None):
                 args.sample_idx = sample_indices[0]
                 print(f"Selected sample_idx {args.sample_idx} to match filter criteria.")
                 
+    filter_suffix = f"_{filter_hash}"
+                
     # 6. Extract raw attention maps & Rollout (with caching)
     cache_dir = os.path.join(output_base, "cache")
     if args.mode == "aggregate":
