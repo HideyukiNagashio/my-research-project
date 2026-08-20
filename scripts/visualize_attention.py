@@ -563,10 +563,13 @@ def plot_all_attention_approaches(agg_maps, agg_rollout_raw, num_samples, output
     fig_pm.savefig(os.path.join(output_base, "phase_matrix", f"phase_matrix_aggregate{filter_suffix}.png"), dpi=300, bbox_inches='tight')
     plt.close(fig_pm)
 
+    # Safely reconstruct tick_vals_in from tick_labels_in since it's not passed as an argument
+    tick_vals_in_local = [float(lbl.replace('%', '')) for lbl in tick_labels_in]
+
     # Save rollout profile aggregate
     fig_prof, ax_prof = plt.subplots(figsize=(10, 4))
     mean_prof = np.mean(agg_rollout, axis=0)
-    gait_cycle_pct = pct_array_in if 'pct_array_in' in locals() else np.linspace(start_pct_in, end_pct_in, len(mean_prof))
+    gait_cycle_pct = np.linspace(start_pct_in, end_pct_in, len(mean_prof))
     ax_prof.plot(gait_cycle_pct, mean_prof, color="tab:red", linewidth=2.5, label="Key-wise Mean Rollout")
     ax_prof.set_title(f"Aggregated Attention Profile (N={num_samples})", fontsize=12, fontweight='bold')
     ax_prof.set_xlabel("Key (% Gait Cycle)", fontsize=10)
@@ -574,7 +577,7 @@ def plot_all_attention_approaches(agg_maps, agg_rollout_raw, num_samples, output
     ax_prof.grid(True, linestyle=":", alpha=0.6)
     ax_prof.legend(loc="upper right")
     ax_prof.set_xlim(start_pct_in, end_pct_in)
-    ax_prof.set_xticks(tick_vals_in if 'tick_vals_in' in locals() else [])
+    ax_prof.set_xticks(tick_vals_in_local)
     ax_prof.set_xticklabels(tick_labels_in)
     fig_prof.savefig(os.path.join(output_base, "rollout", f"rollout_profile_aggregate{filter_suffix}.png"), dpi=300, bbox_inches='tight')
     plt.close(fig_prof)
@@ -583,16 +586,16 @@ def plot_all_attention_approaches(agg_maps, agg_rollout_raw, num_samples, output
     fig_layers, ax_layers = plt.subplots(figsize=(10, 4))
     colors = ["tab:blue", "tab:orange", "tab:green", "tab:purple", "tab:brown"]
     for l_idx in range(num_layers):
-        mean_prof_l = np.mean(layer_averages[l_idx], axis=0)
-        # Assuming variance calculation was skipped for aggregate due to pre-mean cache.
+        mean_prof_l = np.mean(layer_averages[l_idx], axis=0) # Mean over Query
+        gait_cycle_pct = np.linspace(start_pct_in, end_pct_in, len(mean_prof_l))
         ax_layers.plot(gait_cycle_pct, mean_prof_l, label=f"Layer {l_idx + 1}", color=colors[l_idx % len(colors)], linewidth=2.0)
-    ax_layers.set_title(f"Aggregated Attention Profile per Layer (N={num_samples})", fontsize=12, fontweight='bold')
+    ax_layers.set_title(f"Attention Profile per Layer (N={num_samples})", fontsize=12, fontweight='bold')
     ax_layers.set_xlabel("Key (% Gait Cycle)", fontsize=10)
-    ax_layers.set_ylabel("Key-wise Attention Mean", fontsize=10)
+    ax_layers.set_ylabel("Attention Mean", fontsize=10)
     ax_layers.grid(True, linestyle=":", alpha=0.6)
     ax_layers.legend(loc="upper right")
     ax_layers.set_xlim(start_pct_in, end_pct_in)
-    ax_layers.set_xticks(tick_vals_in if 'tick_vals_in' in locals() else [])
+    ax_layers.set_xticks(tick_vals_in_local)
     ax_layers.set_xticklabels(tick_labels_in)
     fig_layers.savefig(os.path.join(output_base, "rollout", f"layer_attention_profile_aggregate{filter_suffix}.png"), dpi=300, bbox_inches='tight')
     plt.close(fig_layers)
