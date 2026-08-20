@@ -105,7 +105,12 @@ def parse_args():
     parser.add_argument(
         "--no_show",
         action="store_true",
-        help="Do not display the plot (save only)"
+        help="Do not display interactive matplotlib windows"
+    )
+    parser.add_argument(
+        "--force_recalc",
+        action="store_true",
+        help="Force recalculation instead of using cached .npy files if they exist"
     )
     return parser.parse_args()
 
