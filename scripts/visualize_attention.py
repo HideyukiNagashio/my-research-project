@@ -553,11 +553,10 @@ def plot_all_attention_approaches(agg_maps, agg_rollout_raw, num_samples, output
     fig_pm, ax_pm = plt.subplots(figsize=(7, 6))
     sns.heatmap(
         p_matrix_agg, cmap="viridis", annot=True, fmt=".4f", ax=ax_pm, square=True,
-        xticklabels=phase_names_q, yticklabels=phase_names_k
+        xticklabels=phase_names_q, yticklabels=phase_names_k, vmin=0.0, vmax=vmax
     )
-    ax_pm.set_title(f"Aggregated Phase Matrix (N={num_samples})", fontsize=12, fontweight='bold')
-    ax_pm.set_xlabel("Query (Current Phase / Output)", fontsize=10)
-    ax_pm.set_ylabel("Key (Attended Phase / Input)", fontsize=10)
+    ax_pm.set_xlabel("Query", fontsize=10)
+    ax_pm.set_ylabel("Key", fontsize=10)
     ax_pm.set_xticklabels(phase_names_q, rotation=45)
     ax_pm.set_yticklabels(phase_names_k, rotation=0)
     ax_pm.invert_yaxis()
@@ -571,13 +570,12 @@ def plot_all_attention_approaches(agg_maps, agg_rollout_raw, num_samples, output
     fig_prof, ax_prof = plt.subplots(figsize=(10, 4))
     mean_prof = np.mean(agg_rollout, axis=0)
     gait_cycle_pct = np.linspace(start_pct_in, end_pct_in, len(mean_prof))
-    ax_prof.plot(gait_cycle_pct, mean_prof, color="tab:red", linewidth=2.5, label="Key-wise Mean Rollout")
-    ax_prof.set_title(f"Aggregated Attention Profile (N={num_samples})", fontsize=12, fontweight='bold')
+    ax_prof.plot(gait_cycle_pct, mean_prof, color="tab:red", linewidth=2.5)
     ax_prof.set_xlabel("Key (% Gait Cycle)", fontsize=10)
     ax_prof.set_ylabel("Attention Mean", fontsize=10)
     ax_prof.grid(True, linestyle=":", alpha=0.6)
-    ax_prof.legend(loc="upper right")
-    ax_prof.set_xlim(start_pct_in, end_pct_in)
+    ax_prof.set_xlim(-40, 100)
+    ax_prof.set_ylim(0, 0.07)
     ax_prof.set_xticks(tick_vals_in_local)
     ax_prof.set_xticklabels(tick_labels_in)
     fig_prof.savefig(os.path.join(output_base, "rollout", f"rollout_profile_aggregate{filter_suffix}.png"), dpi=300, bbox_inches='tight')
