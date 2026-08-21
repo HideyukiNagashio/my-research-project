@@ -485,6 +485,7 @@ def plot_feature_importance_bars(abs_sums, rel_pcts, feature_names, out_label, s
     ax2.invert_yaxis()
     ax2.set_xlabel('Relative Importance (%)')
     ax2.set_title(f"Feature Relative Importance % ({out_label})", fontsize=14, fontweight='bold')
+    ax2.set_xlim(0, 15)
     ax2.grid(axis='x', linestyle='--', alpha=0.7)
     for i, v in enumerate(rel_pcts):
         ax2.text(v + 0.5, i, f"{v:.1f}%", va='center', fontsize=9)
