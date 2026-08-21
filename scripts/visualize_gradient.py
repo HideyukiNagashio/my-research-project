@@ -19,6 +19,7 @@ import matplotlib
 if 'DISPLAY' not in os.environ:
     matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+plt.rcParams['font.family'] = 'Times New Roman'
 import seaborn as sns
 import torch
 import torch.nn as nn

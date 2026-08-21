@@ -17,6 +17,7 @@ import matplotlib
 if 'DISPLAY' not in os.environ or '--no_show' in sys.argv:
     matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+plt.rcParams['font.family'] = 'Times New Roman'
 import matplotlib.gridspec as gridspec
 import seaborn as sns
 import torch
