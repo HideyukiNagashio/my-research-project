@@ -412,7 +412,7 @@ def plot_feature_phase_matrix(mean_map, out_label, feature_names, seq_len, start
     plt.figure(figsize=(10, 8))
     
     # Use a colormap with 'bad' set to lightgray for NaN values
-    cmap = plt.cm.rocket_r.copy()
+    cmap = sns.color_palette("rocket_r", as_cmap=True).copy()
     cmap.set_bad(color='lightgray')
     
     sns.heatmap(
@@ -485,7 +485,7 @@ def plot_overall_average_map(mean_map, out_label, feature_names, tick_indices, t
         
     plt.figure(figsize=(12, 6))
     
-    cmap = plt.cm.rocket_r.copy()
+    cmap = sns.color_palette("rocket_r", as_cmap=True).copy()
     cmap.set_bad(color='lightgray')
     
     sns.heatmap(final_map, cmap=cmap, yticklabels=feature_names, cbar_kws={'label': 'Mean Gradient Magnitude'}, vmin=0.0, vmax=vmax)
