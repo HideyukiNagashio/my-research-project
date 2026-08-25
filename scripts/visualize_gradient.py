@@ -56,7 +56,13 @@ def get_phase_indices(seq_len=200, seq_start_pct=0.0, seq_end_pct=100.0):
 
 
 
-def plot_all_gradient_approaches(mean_3d_dynamics, fold_out_dir, out_label, feature_names, in_cols, x_tick_indices, x_tick_labels, y_tick_indices, y_tick_labels, stride_type_X, stride_type_Y, phase_slices, in_dim, seq_len, sample_suffix):
+def plot_all_gradient_approaches(mean_3d_dynamics, fold_out_dir, out_label, feature_names, in_cols, x_tick_indices, x_tick_labels, y_tick_indices, y_tick_labels, stride_type_X, stride_type_Y, phase_slices, in_dim, seq_len, sample_suffix, vmax_dict_parsed=None):
+    from scripts.plot_utils import get_gait_phase_ticks
+    pct_array_in, _, _, _ = get_gait_phase_ticks(stride_type_X, seq_len)
+    start_pct_X, end_pct_X = pct_array_in[0], pct_array_in[-1]
+    
+    vmax = vmax_dict_parsed.get(out_label, None) if vmax_dict_parsed else None
+
     # --- 2. Approach 1: Dynamics Maps ---
     print(f"\n--> Running Approach 1: Dynamics Maps for Output {out_label}...")
     t_app1_start = time.time()
@@ -75,9 +81,17 @@ def plot_all_gradient_approaches(mean_3d_dynamics, fold_out_dir, out_label, feat
     timers_app2 = {'Plotting': 0.0, 'Save Figure': 0.0}
     mean_average = np.mean(mean_3d_dynamics, axis=2)
     save_path = os.path.join(fold_out_dir, "average", f"overall_average_map_{out_label}{sample_suffix}.png")
-    plot_overall_average_map(mean_average, out_label, feature_names, y_tick_indices, y_tick_labels, stride_type_X, save_path, timers=timers_app2)
+    plot_overall_average_map(mean_average, out_label, feature_names, y_tick_indices, y_tick_labels, stride_type_X, save_path, timers=timers_app2, vmax=vmax)
     t_app2_total = time.time() - t_app2_start
     print(f"Approach 2 Time: {t_app2_total:.3f}s")
+    
+    # --- 3.5. Feature-by-Phase Importance Map ---
+    print(f"\n--> Running Feature-by-Phase Importance Map for Output {out_label}...")
+    t_app2_5_start = time.time()
+    save_path_phase = os.path.join(fold_out_dir, "phase", f"feature_phase_matrix_{out_label}{sample_suffix}.png")
+    plot_feature_phase_matrix(mean_average, out_label, feature_names, seq_len, start_pct_X, end_pct_X, save_path=save_path_phase, vmax=vmax, timers=timers_app2)
+    t_app2_5_total = time.time() - t_app2_5_start
+    print(f"Feature-by-Phase Time: {t_app2_5_total:.3f}s")
     
     # --- 4. Approach 3: Phase-wise Smoothed Maps ---
     print(f"\n--> Running Approach 3: Phase-wise Smoothed Maps for Output {out_label}...")
@@ -360,20 +374,126 @@ def plot_dynamics_map(dynamics_map, out_label, in_label, x_tick_indices, x_tick_
             
     plt.close()
 
-
-def plot_overall_average_map(mean_map, out_label, feature_names, tick_indices, tick_labels, x_stride_type, save_path=None, timers=None):
-    """Plots and saves the overall average sensitivity heatmap."""
+def plot_feature_phase_matrix(mean_map, out_label, feature_names, seq_len, start_pct, end_pct, save_path=None, vmax=None, timers=None):
+    """Plots and saves a 14x10 heatmap of average gradient magnitude per phase."""
+    from scripts.plot_utils import DEFAULT_GAIT_PHASES
+    
     if timers is not None:
         t_plot_start = time.time()
         
+    num_features = len(feature_names)
+    phase_names = list(DEFAULT_GAIT_PHASES.keys())
+    num_phases = len(phase_names)
+    
+    # Initialize matrix with NaN
+    phase_matrix = np.full((num_features, num_phases), np.nan)
+    
+    for j, phase_name in enumerate(phase_names):
+        p_start, p_end = DEFAULT_GAIT_PHASES[phase_name]
+        
+        # Check if phase is out of bounds
+        if p_end <= start_pct or p_start >= end_pct:
+            continue
+            
+        # Clip to sequence bounds
+        clamped_start = max(p_start, start_pct)
+        clamped_end = min(p_end, end_pct)
+        
+        # Convert to indices
+        idx_start = int((clamped_start - start_pct) / (end_pct - start_pct) * (seq_len - 1))
+        idx_end = int((clamped_end - start_pct) / (end_pct - start_pct) * (seq_len - 1))
+        
+        if idx_end > idx_start:
+            # Slice the mean_map (shape: in_dim, seq_len)
+            phase_slice = mean_map[:, idx_start:idx_end]
+            # Average over the time dimension for this phase
+            phase_matrix[:, j] = np.mean(phase_slice, axis=1)
+            
+    plt.figure(figsize=(10, 8))
+    
+    # Use a colormap with 'bad' set to lightgray for NaN values
+    cmap = plt.cm.rocket_r.copy()
+    cmap.set_bad(color='lightgray')
+    
+    sns.heatmap(
+        phase_matrix, cmap=cmap, annot=True, fmt=".3f", 
+        xticklabels=phase_names, yticklabels=feature_names,
+        vmin=0.0, vmax=vmax, cbar_kws={'label': 'Mean Gradient Magnitude'}
+    )
+    
+    plt.title(f"Feature Importance by Phase ({out_label})")
+    plt.xlabel("Gait Phase")
+    plt.ylabel("Input Features")
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    
+    if timers is not None:
+        timers['Plotting'] += time.time() - t_plot_start
+        
+    if save_path:
+        if timers is not None:
+            t_save_start = time.time()
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        plt.savefig(save_path, dpi=150)
+        if timers is not None:
+            timers['Save Figure'] += time.time() - t_save_start
+            
+    plt.close()
+def plot_overall_average_map(mean_map, out_label, feature_names, tick_indices, tick_labels, x_stride_type, save_path=None, timers=None, vmax=None):
+    """Plots and saves the overall average sensitivity heatmap."""
+    from scripts.plot_utils import get_gait_phase_ticks
+    
+    if timers is not None:
+        t_plot_start = time.time()
+        
+    seq_len = mean_map.shape[1]
+    pct_array, _, _, _ = get_gait_phase_ticks(x_stride_type, seq_len)
+    start_pct, end_pct = pct_array[0], pct_array[-1]
+    
+    global_start_pct = -40.0
+    global_end_pct = 100.0
+    
+    if end_pct > start_pct:
+        pixels_per_pct = seq_len / (end_pct - start_pct)
+        left_pad_pct = max(0, start_pct - global_start_pct)
+        right_pad_pct = max(0, global_end_pct - end_pct)
+        
+        left_pad_cols = int(round(left_pad_pct * pixels_per_pct))
+        right_pad_cols = int(round(right_pad_pct * pixels_per_pct))
+        
+        total_cols = left_pad_cols + seq_len + right_pad_cols
+        
+        full_map = np.full((mean_map.shape[0], total_cols), np.nan)
+        full_map[:, left_pad_cols:left_pad_cols+seq_len] = mean_map
+        
+        # Generate new ticks for -40 to 100
+        tick_vals = list(range(-40, 101, 20))
+        new_tick_indices = []
+        new_tick_labels = []
+        for val in tick_vals:
+            idx = (val - global_start_pct) / (global_end_pct - global_start_pct) * (total_cols - 1)
+            new_tick_indices.append(idx)
+            new_tick_labels.append(str(val))
+            
+        final_map = full_map
+        final_tick_indices = new_tick_indices
+        final_tick_labels = new_tick_labels
+    else:
+        final_map = mean_map
+        final_tick_indices = tick_indices
+        final_tick_labels = tick_labels
+        
     plt.figure(figsize=(12, 6))
     
-    sns.heatmap(mean_map, cmap="rocket_r", yticklabels=feature_names, cbar_kws={'label': 'Mean Gradient Magnitude'})
+    cmap = plt.cm.rocket_r.copy()
+    cmap.set_bad(color='lightgray')
     
-    plt.xticks(tick_indices, tick_labels)
+    sns.heatmap(final_map, cmap=cmap, yticklabels=feature_names, cbar_kws={'label': 'Mean Gradient Magnitude'}, vmin=0.0, vmax=vmax)
+    
+    plt.xticks(final_tick_indices, final_tick_labels)
     
     plt.title(f"Overall Average Sensitivity Map ({out_label} Output)\nVertical: Input Columns, Horizontal: Input Time $y$")
-    plt.xlabel(f"Input Time $y$ (% of Gait Cycle: {x_stride_type})")
+    plt.xlabel("Input Time $y$ (% of Gait Cycle)")
     plt.ylabel("Input Features")
     plt.tight_layout()
     
@@ -686,6 +806,12 @@ def parse_args():
         action="store_true",
         help="Force recalculation instead of using cached .npy files if they exist"
     )
+    parser.add_argument(
+        "--vmax_dict",
+        type=str,
+        default=None,
+        help="JSON string specifying absolute vmax per output variable for cross-experiment comparison (e.g. '{\"Fx\": 0.5}')"
+    )
     return parser.parse_args()
 
 
@@ -693,6 +819,15 @@ def main():
     args = parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
+    vmax_dict_parsed = {}
+    if args.vmax_dict:
+        import json
+        try:
+            vmax_dict_parsed = json.loads(args.vmax_dict)
+            print(f"Loaded vmax_dict: {vmax_dict_parsed}")
+        except Exception as e:
+            print(f"Error parsing vmax_dict: {e}")
+            
     # CASE 1: Standalone Demo Mode
     if args.exp_dir is None:
         print("No experiment directory specified. Running in Standalone Demo Mode...")
@@ -966,7 +1101,7 @@ def main():
                 global_accum[o_c] = global_accum.get(o_c, 0) + mean_3d_dynamics * len(indices_to_avg)
                 global_samples_dict[fold] = len(indices_to_avg)
                 
-            plot_all_gradient_approaches(mean_3d_dynamics, fold_out_dir, out_label, feature_names, in_cols, x_tick_indices, x_tick_labels, y_tick_indices, y_tick_labels, stride_type_X, stride_type_Y, phase_slices, in_dim, seq_len, sample_suffix)
+            plot_all_gradient_approaches(mean_3d_dynamics, fold_out_dir, out_label, feature_names, in_cols, x_tick_indices, x_tick_labels, y_tick_indices, y_tick_labels, stride_type_X, stride_type_Y, phase_slices, in_dim, seq_len, sample_suffix, vmax_dict_parsed)
             
         print(f"\nFold {fold} processing complete. Outputs saved to: {fold_out_dir}")
         
@@ -989,7 +1124,7 @@ def main():
             global_mean_3d = global_accum[o_c] / total_samples
             
             print(f"\n--> Plotting Global Average for Output {out_label}...")
-            plot_all_gradient_approaches(global_mean_3d, global_out_dir, out_label, feature_names, in_cols, x_tick_indices, x_tick_labels, y_tick_indices, y_tick_labels, stride_type_X, stride_type_Y, phase_slices, in_dim, seq_len, "_global_mean")
+            plot_all_gradient_approaches(global_mean_3d, global_out_dir, out_label, feature_names, in_cols, x_tick_indices, x_tick_labels, y_tick_indices, y_tick_labels, stride_type_X, stride_type_Y, phase_slices, in_dim, seq_len, "_global_mean", vmax_dict_parsed)
             
     print("\nAll tasks completed successfully!")
 
