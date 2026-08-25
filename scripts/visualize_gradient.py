@@ -416,7 +416,7 @@ def plot_feature_phase_matrix(mean_map, out_label, feature_names, seq_len, start
     cmap.set_bad(color='lightgray')
     
     sns.heatmap(
-        phase_matrix, cmap=cmap, annot=True, fmt=".3f", 
+        phase_matrix, cmap=cmap, annot=True, fmt=".5f", 
         xticklabels=phase_names, yticklabels=feature_names,
         vmin=0.0, vmax=vmax, cbar_kws={'label': 'Mean Gradient Magnitude'}
     )
