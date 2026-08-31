@@ -20,7 +20,7 @@ def get_args_parser():
     
     # --- Model Settings ---
     parser.add_argument('--model_type', type=str, default='cnn', 
-                        choices=['cnn', 'bilstm', 'transformer', 'transformer_gelu', 'hybrid_grf', 'hybrid_edge', 'hybrid_gat', 'hybrid_gcn_res'],
+                        choices=['cnn', 'bilstm', 'transformer', 'transformer_gelu', 'hybrid_grf', 'hybrid_edge', 'hybrid_gat', 'hybrid_gcn_res', 'hybrid_gcn_edge_parallel'],
                         help='Model architecture to use')
     # Transformer ones
     parser.add_argument('--d_model', type=int, default=128, help='Transformer embedding dim')
