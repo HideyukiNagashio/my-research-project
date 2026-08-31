@@ -162,6 +162,35 @@ def count_hybrid_gcn_res_params(input_dim, num_layers, dim_feedforward, output_d
     trainable = conv1 + conv2 + pool + fc_proj + pos_emb + encoder_params + fc_out
     return trainable, trainable
 
+def count_hybrid_gcn_edge_parallel_params(input_dim, num_layers, dim_feedforward, output_dim, gnn_out_dim, cnn_pool_dim, d_model, seq_len=200):
+    # GCN (Branch A)
+    conv1 = 3 * gnn_out_dim + gnn_out_dim
+    conv2 = gnn_out_dim * gnn_out_dim + gnn_out_dim
+    # EdgeConv (Branch B)
+    mlp1 = (6 * gnn_out_dim + gnn_out_dim) + (gnn_out_dim * gnn_out_dim + gnn_out_dim)
+    mlp2 = (2 * gnn_out_dim * gnn_out_dim + gnn_out_dim) + (gnn_out_dim * gnn_out_dim + gnn_out_dim)
+    
+    pool = (8 * (2 * gnn_out_dim)) * cnn_pool_dim + cnn_pool_dim
+    
+    combined_dim = cnn_pool_dim + (input_dim - 8)
+    fc_proj = combined_dim * d_model + d_model
+    
+    pos_emb = 1 * seq_len * d_model
+    
+    attn_in_proj = 3 * d_model * d_model + 3 * d_model
+    attn_out_proj = d_model * d_model + d_model
+    ff_linear1 = dim_feedforward * d_model + dim_feedforward
+    ff_linear2 = d_model * dim_feedforward + d_model
+    norm1 = 2 * d_model
+    norm2 = 2 * d_model
+    layer_params = attn_in_proj + attn_out_proj + ff_linear1 + ff_linear2 + norm1 + norm2
+    encoder_params = layer_params * num_layers
+    
+    fc_out = d_model * output_dim + output_dim
+    
+    trainable = conv1 + conv2 + mlp1 + mlp2 + pool + fc_proj + pos_emb + encoder_params + fc_out
+    return trainable, trainable
+
 def main():
     experiments_dir = "outputs/experiments"
     if not os.path.exists(experiments_dir):
@@ -219,7 +248,7 @@ def main():
             num_layers = config.get("num_layers", 3)
             dim_feedforward = config.get("dim_feedforward", 256)
             trainable, total = count_transformer_params(in_dim, d_model, nhead, num_layers, dim_feedforward, out_dim)
-        elif model_type in ['hybrid_grf', 'hybrid_edge', 'hybrid_gat', 'hybrid_gcn_res']:
+        elif model_type in ['hybrid_grf', 'hybrid_edge', 'hybrid_gat', 'hybrid_gcn_res', 'hybrid_gcn_edge_parallel']:
             gnn_out_dim = config.get("gnn_out_dim", 16)
             cnn_pool_dim = config.get("cnn_pool_dim", 32)
             num_layers = config.get("num_layers", 2)
@@ -233,6 +262,8 @@ def main():
                 trainable, total = count_hybrid_gat_params(in_dim, num_layers, dim_feedforward, out_dim, gnn_out_dim, cnn_pool_dim, d_model)
             elif model_type == 'hybrid_gcn_res':
                 trainable, total = count_hybrid_gcn_res_params(in_dim, num_layers, dim_feedforward, out_dim, gnn_out_dim, cnn_pool_dim, d_model)
+            elif model_type == 'hybrid_gcn_edge_parallel':
+                trainable, total = count_hybrid_gcn_edge_parallel_params(in_dim, num_layers, dim_feedforward, out_dim, gnn_out_dim, cnn_pool_dim, d_model)
         else:
             continue
             
