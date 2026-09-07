@@ -20,6 +20,12 @@ if 'DISPLAY' not in os.environ:
     matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 plt.rcParams['font.family'] = 'Times New Roman'
+plt.rcParams.update({
+    'font.size': 16,
+    'axes.labelsize': 18,
+    'xtick.labelsize': 16,
+    'ytick.labelsize': 16,
+})
 import seaborn as sns
 import torch
 import torch.nn as nn
@@ -354,8 +360,6 @@ def plot_dynamics_map(dynamics_map, out_label, in_label, x_tick_indices, x_tick_
     
     plt.xticks(x_tick_indices, x_tick_labels)
     plt.yticks(y_tick_indices, y_tick_labels)
-    
-    plt.title(f"Dynamics Map ({out_label} Output vs {in_label} Input)\nVertical: Input Time (Y), Horizontal: Output Time (X)")
     plt.xlabel(f"Output Time $x$ (% of Gait Cycle: {stride_type_out})")
     plt.ylabel(f"Input Time $y$ (% of Gait Cycle: {stride_type_in})")
     plt.gca().invert_yaxis()  # Keep 0 at bottom
@@ -420,8 +424,6 @@ def plot_feature_phase_matrix(mean_map, out_label, feature_names, seq_len, start
         xticklabels=phase_names, yticklabels=feature_names,
         vmin=0.0, vmax=vmax, cbar_kws={'label': 'Mean Gradient Magnitude'}
     )
-    
-    plt.title(f"Feature Importance by Phase ({out_label})")
     plt.xlabel("Gait Phase")
     plt.ylabel("Input Features")
     plt.xticks(rotation=45)
@@ -491,8 +493,6 @@ def plot_overall_average_map(mean_map, out_label, feature_names, tick_indices, t
     sns.heatmap(final_map, cmap=cmap, yticklabels=feature_names, cbar_kws={'label': 'Mean Gradient Magnitude'}, vmin=0.0, vmax=vmax)
     
     plt.xticks(final_tick_indices, final_tick_labels)
-    
-    plt.title(f"Overall Average Sensitivity Map ({out_label} Output)\nVertical: Input Columns, Horizontal: Input Time $y$")
     plt.xlabel("Input Time $y$ (% of Gait Cycle)")
     plt.ylabel("Input Features")
     plt.tight_layout()
@@ -550,7 +550,6 @@ def plot_phase_smoothed_maps(phase_maps, out_label, feature_names, tick_indices,
         ax.set_ylabel("Input Features" if show_ylabel else "")
         
     plt.xlabel(f"Input Time $y$ (% of Gait Cycle: {x_stride_type})")
-    plt.suptitle(f"Phase-wise Smoothed Sensitivity Maps ({out_label} Output)\nVertical: Features, Horizontal: Input Time", y=0.99, fontsize=14)
     plt.tight_layout()
     
     if timers is not None:
@@ -581,7 +580,6 @@ def plot_feature_importance_bars(abs_sums, rel_pcts, feature_names, out_label, s
     ax1.set_yticklabels(feature_names)
     ax1.invert_yaxis()
     ax1.set_xlabel('Absolute Gradient Sum')
-    ax1.set_title(f"Feature Absolute Importance ({out_label})", fontsize=14, fontweight='bold')
     ax1.grid(axis='x', linestyle='--', alpha=0.7)
     plt.tight_layout()
     if timers is not None:
@@ -605,7 +603,6 @@ def plot_feature_importance_bars(abs_sums, rel_pcts, feature_names, out_label, s
     ax2.set_yticklabels(feature_names)
     ax2.invert_yaxis()
     ax2.set_xlabel('Relative Importance (%)')
-    ax2.set_title(f"Feature Relative Importance % ({out_label})", fontsize=14, fontweight='bold')
     ax2.set_xlim(0, 15)
     ax2.grid(axis='x', linestyle='--', alpha=0.7)
     for i, v in enumerate(rel_pcts):
