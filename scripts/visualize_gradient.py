@@ -809,6 +809,11 @@ def parse_args():
         default=None,
         help="JSON string specifying absolute vmax per output variable for cross-experiment comparison (e.g. '{\"Fx\": 0.5}')"
     )
+    parser.add_argument(
+        "--global_only",
+        action="store_true",
+        help="Skip individual fold plots and only plot the all_folds_average"
+    )
     return parser.parse_args()
 
 
@@ -1098,7 +1103,10 @@ def main():
                 global_accum[o_c] = global_accum.get(o_c, 0) + mean_3d_dynamics * len(indices_to_avg)
                 global_samples_dict[fold] = len(indices_to_avg)
                 
-            plot_all_gradient_approaches(mean_3d_dynamics, fold_out_dir, out_label, feature_names, in_cols, x_tick_indices, x_tick_labels, y_tick_indices, y_tick_labels, stride_type_X, stride_type_Y, phase_slices, in_dim, seq_len, sample_suffix, vmax_dict_parsed)
+            if not args.global_only:
+                plot_all_gradient_approaches(mean_3d_dynamics, fold_out_dir, out_label, feature_names, in_cols, x_tick_indices, x_tick_labels, y_tick_indices, y_tick_labels, stride_type_X, stride_type_Y, phase_slices, in_dim, seq_len, sample_suffix, vmax_dict_parsed)
+            else:
+                print(f"Skipping plot generation for Fold {fold} Output {out_label} (--global_only active)")
             
         print(f"\nFold {fold} processing complete. Outputs saved to: {fold_out_dir}")
         
