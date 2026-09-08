@@ -7,6 +7,7 @@ from .hybrid_edge_conv import HybridEdgeConvModel
 from .hybrid_gat_conv import HybridGATConvModel
 from .hybrid_gcn_residual import HybridGCNResidualModel
 from .hybrid_gcn_edge_parallel import HybridGCNEdgeParallelModel
+from .transformer_aligned import AlignedTimeSeriesTransformer
 
 def get_model(model_name: str, **kwargs):
     """
@@ -31,5 +32,7 @@ def get_model(model_name: str, **kwargs):
         return HybridGCNResidualModel(**kwargs)
     elif model_name == 'hybrid_gcn_edge_parallel':
         return HybridGCNEdgeParallelModel(**kwargs)
+    elif model_name == 'transformer_aligned':
+        return AlignedTimeSeriesTransformer(**kwargs)
     else:
-        raise ValueError(f"Unknown model name: {model_name}. Supported models are: cnn, bilstm, transformer, transformer_gelu, hybrid_grf, hybrid_edge, hybrid_gat, hybrid_gcn_res, hybrid_gcn_edge_parallel.")
+        raise ValueError(f"Unknown model name: {model_name}. Supported models are: cnn, bilstm, transformer, transformer_gelu, transformer_aligned, hybrid_grf, hybrid_edge, hybrid_gat, hybrid_gcn_res, hybrid_gcn_edge_parallel.")
