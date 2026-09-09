@@ -32,7 +32,7 @@ def create_graph_structure(use_shortcut=False, fully_connected=False):
     else:
         # 基本エッジ
         base_edges = [
-            (0, 1), (1, 2), (2, 3), (5, 6), (6, 7), (3, 4), (4, 5), (1, 6)
+            (0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 6), (6, 7), (5, 7), (1, 6)
         ]
         # ショートカットエッジ (アブレーション用)
         shortcut_edges = [
