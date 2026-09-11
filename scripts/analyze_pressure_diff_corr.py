@@ -1,9 +1,10 @@
 import os
 import glob
-import pickle
 import numpy as np
 import pandas as pd
 from scipy.stats import pearsonr
+import torch
+from src.training.dataset import GaitDataset
 
 def load_data(data_dir):
     fold_dirs = sorted(glob.glob(os.path.join(data_dir, 'fold*')))
@@ -19,21 +20,22 @@ def load_data(data_dir):
             if not os.path.exists(pkl_path):
                 continue
                 
-            with open(pkl_path, 'rb') as f:
-                data = pickle.load(f)
+            try:
+                # GaitDatasetクラスを利用して正しくデータを抽出
+                dataset = GaitDataset(
+                    pkl_path, 
+                    input_type='single_leg', 
+                    target_type='grf_only',
+                    stride_type_X='0.5', 
+                    stride_type_Y='0.5'
+                )
                 
-                # スタンダードなストライド(X=0.5, Y=0.5)を使用
-                stride_X = '0.5'
-                stride_Y = '0.5'
-                
-                if stride_X in data['X'] and stride_Y in data['y']:
-                    x = data['X'][stride_X]
-                    y = data['y'][stride_Y]
-                    
-                    # xの最初の8chが足底圧力
-                    all_x.append(x[:, :, :8]) 
-                    # yの最後の3chがFx, Fy, Fz (grf_onlyまたはallの場合)
-                    all_y.append(y[:, :, -3:]) 
+                # single_leg: 14次元 (前半8次元が足底圧力)
+                all_x.append(dataset.X.numpy())
+                # grf_only: 3次元 (Fx, Fy, Fz)
+                all_y.append(dataset.y.numpy())
+            except Exception as e:
+                print(f"Skipping {pkl_path} due to error: {e}")
                 
     if len(all_x) == 0:
         raise ValueError("データの読み込みに失敗しました。")
@@ -58,8 +60,11 @@ def main():
         (0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 6), (6, 7), (5, 7), (1, 6)
     ]
     
+    # 前半8chが圧力
+    pressure = X[:, :, :8]
+    
     # Flatten (バッチと時系列をまとめる)
-    X_flat = X.reshape(-1, 8)
+    P_flat = pressure.reshape(-1, 8)
     Y_flat = Y.reshape(-1, 3)
     
     targets = {
@@ -73,7 +78,7 @@ def main():
     # 各エッジにおける圧力差 (x_j - x_i) を計算し、Fx, Fy, Fzとの相関を求める
     for u, v in edges:
         # 圧力差
-        diff = X_flat[:, v] - X_flat[:, u]
+        diff = P_flat[:, v] - P_flat[:, u]
         
         row = {'Edge': f'({u}, {v})'}
         for t_name, t_vals in targets.items():
