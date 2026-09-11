@@ -13,6 +13,7 @@ from .hybrid_edge_aligned import HybridEdgeConvAlignedModel
 from .hybrid_edge_c import HybridEdgeConvModelC
 from .hybrid_edge_d import HybridEdgeConvModelD
 from .hybrid_grf_no_coords import HybridGRFNoCoordsModel
+from .hybrid_edge_no_coords import HybridEdgeNoCoordsModel
 
 def get_model(model_name: str, **kwargs):
     """
@@ -49,5 +50,7 @@ def get_model(model_name: str, **kwargs):
         return HybridEdgeConvModelD(**kwargs)
     elif model_name == 'hybrid_grf_no_coords':
         return HybridGRFNoCoordsModel(**kwargs)
+    elif model_name == 'hybrid_edge_no_coords':
+        return HybridEdgeNoCoordsModel(**kwargs)
     else:
-        raise ValueError(f"Unknown model name: {model_name}. Supported models are: cnn, bilstm, transformer, transformer_gelu, transformer_aligned, hybrid_grf, hybrid_edge, hybrid_gat, hybrid_gcn_res, hybrid_gcn_edge_parallel, hybrid_grf_aligned, hybrid_edge_aligned, hybrid_edge_c, hybrid_edge_d, hybrid_grf_no_coords.")
+        raise ValueError(f"Unknown model name: {model_name}. Supported models are: cnn, bilstm, transformer, transformer_gelu, transformer_aligned, hybrid_grf, hybrid_edge, hybrid_gat, hybrid_gcn_res, hybrid_gcn_edge_parallel, hybrid_grf_aligned, hybrid_edge_aligned, hybrid_edge_c, hybrid_edge_d, hybrid_grf_no_coords, hybrid_edge_no_coords.")

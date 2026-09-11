@@ -135,6 +135,39 @@ def count_hybrid_grf_no_coords_params(input_dim, num_layers, dim_feedforward, ou
     trainable = conv1 + conv2 + pool + fc_proj + pos_emb + encoder_params + fc_out
     return trainable, trainable
 
+def count_hybrid_edge_no_coords_params(input_dim, num_layers, dim_feedforward, output_dim, gnn_out_dim, cnn_pool_dim, d_model, seq_len=200):
+    # MLP 1: input is 2 (pressure_i, pressure_j - pressure_i)
+    mlp1 = (2 * gnn_out_dim + gnn_out_dim) + (gnn_out_dim * gnn_out_dim + gnn_out_dim)
+    # MLP 2: input is 2 * gnn_out_dim
+    mlp2 = (2 * gnn_out_dim * gnn_out_dim + gnn_out_dim) + (gnn_out_dim * gnn_out_dim + gnn_out_dim)
+    conv1 = mlp1
+    conv2 = mlp2
+    
+    pool = (8 * gnn_out_dim) * cnn_pool_dim + cnn_pool_dim
+    
+    combined_dim = cnn_pool_dim + (input_dim - 8)
+    fc_proj = combined_dim * d_model + d_model
+    
+    pos_emb = 0 # using fixed sinusoidal PositionalEncoding
+    
+    attn_in_proj = 3 * d_model * d_model + 3 * d_model
+    attn_out_proj = d_model * d_model + d_model
+    ff_linear1 = dim_feedforward * d_model + dim_feedforward
+    ff_linear2 = d_model * dim_feedforward + d_model
+    norm1 = 2 * d_model
+    norm2 = 2 * d_model
+    layer_params = attn_in_proj + attn_out_proj + ff_linear1 + ff_linear2 + norm1 + norm2
+    encoder_params = layer_params * num_layers
+    
+    fc1_w = 64 * d_model
+    fc1_b = 64
+    fc2_w = output_dim * 64
+    fc2_b = output_dim
+    fc_out = fc1_w + fc1_b + fc2_w + fc2_b
+    
+    trainable = conv1 + conv2 + pool + fc_proj + pos_emb + encoder_params + fc_out
+    return trainable, trainable
+
 def count_hybrid_edge_params(input_dim, num_layers, dim_feedforward, output_dim, gnn_out_dim, cnn_pool_dim, d_model, seq_len=200):
     mlp1 = (6 * gnn_out_dim + gnn_out_dim) + (gnn_out_dim * gnn_out_dim + gnn_out_dim)
     mlp2 = (2 * gnn_out_dim * gnn_out_dim + gnn_out_dim) + (gnn_out_dim * gnn_out_dim + gnn_out_dim)
@@ -277,7 +310,7 @@ def main():
             num_layers = config.get("num_layers", 3)
             dim_feedforward = config.get("dim_feedforward", 256)
             trainable, total = count_transformer_params(in_dim, d_model, nhead, num_layers, dim_feedforward, out_dim)
-        elif model_type in ['hybrid_grf', 'hybrid_edge', 'hybrid_gat', 'hybrid_gcn_res', 'hybrid_gcn_edge_parallel', 'hybrid_grf_no_coords']:
+        elif model_type in ['hybrid_grf', 'hybrid_edge', 'hybrid_gat', 'hybrid_gcn_res', 'hybrid_gcn_edge_parallel', 'hybrid_grf_no_coords', 'hybrid_edge_no_coords']:
             gnn_out_dim = config.get("gnn_out_dim", 16)
             cnn_pool_dim = config.get("cnn_pool_dim", 32)
             num_layers = config.get("num_layers", 2)
@@ -295,6 +328,8 @@ def main():
                 trainable, total = count_hybrid_gcn_edge_parallel_params(in_dim, num_layers, dim_feedforward, out_dim, gnn_out_dim, cnn_pool_dim, d_model)
             elif model_type == 'hybrid_grf_no_coords':
                 trainable, total = count_hybrid_grf_no_coords_params(in_dim, num_layers, dim_feedforward, out_dim, gnn_out_dim, cnn_pool_dim, d_model)
+            elif model_type == 'hybrid_edge_no_coords':
+                trainable, total = count_hybrid_edge_no_coords_params(in_dim, num_layers, dim_feedforward, out_dim, gnn_out_dim, cnn_pool_dim, d_model)
         else:
             continue
             
