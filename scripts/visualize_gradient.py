@@ -21,7 +21,7 @@ if 'DISPLAY' not in os.environ:
 import matplotlib.pyplot as plt
 plt.rcParams['font.family'] = 'Times New Roman'
 plt.rcParams.update({
-    'font.size': 16,
+    'font.size': 14,
     'axes.labelsize': 18,
     'xtick.labelsize': 16,
     'ytick.labelsize': 16,
