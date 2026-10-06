@@ -189,8 +189,7 @@ def main():
     df_subject_ablation.to_csv(os.path.join(OUTPUT_DIR, "edge_ablation_subjectwise.csv"), index=False)
     
     # Aggregate over all subjects
-    df_ablation = df_subject_ablation.groupby("edge", as_index=False).mean()
-    df_ablation.drop(columns=["fold"], inplace=True, errors='ignore')
+    df_ablation = df_subject_ablation.drop(columns=["subject", "fold"], errors='ignore').groupby("edge", as_index=False).mean()
     
     # Sort by delta_Fx_NRMSE
     df_ablation = df_ablation.sort_values(by="delta_Fx_NRMSE", ascending=False)
