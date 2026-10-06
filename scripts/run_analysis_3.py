@@ -20,7 +20,7 @@ from src.training.engine import Trainer
 from src.training.metrics import calculate_metrics
 
 BASE_DIR = os.path.join(repo_root, "outputs/experiments")
-EDGE_EXP_DIR = os.path.join(BASE_DIR, "hybrid_edge_X_0.5_Y_0.5_hybrid_edge_20260731_070706")
+EDGE_EXP_DIR = os.path.join(BASE_DIR, "new_hybrid_edge_X_0.5_Y_0.5_hybrid_edge_20261006_070416")
 OUTPUT_DIR = os.path.join(repo_root, "outputs/analysis")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 TARGET_FEATURES = ["Fx", "Fy", "Fz"]
