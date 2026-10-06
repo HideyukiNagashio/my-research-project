@@ -51,11 +51,15 @@ def main():
     # Each list will contain arrays of shape (200,) for each subject
     subject_maes = {m: {f: [] for f in TARGET_FEATURES} for m in EXPERIMENT_DIRS}
     
+    global_subjects = []
+    
     for fold in range(1, num_folds + 1):
         meta_base = data[baseline_model][fold]["meta"]
         unique_subjects = meta_base["subject_name"].unique()
         
         for sub in unique_subjects:
+            global_subjects.append(sub)
+            
             mask_base = (meta_base["subject_name"] == sub).values
             targets = data[baseline_model][fold]["targets"][mask_base]
             
@@ -91,15 +95,12 @@ def main():
     
     phase_results = []
     
-    # meta_base from fold 1 (using Transformer) for subject list
-    unique_subjects = data["Transformer"][1]["meta"]["subject_name"].unique()
-    
     for feat in TARGET_FEATURES:
         for model_name in EXPERIMENT_DIRS:
             # subject_maes[model_name][feat] is (12, 200)
             mae_array = subject_maes[model_name][feat]
             
-            for sub_idx, sub_name in enumerate(unique_subjects):
+            for sub_idx, sub_name in enumerate(global_subjects):
                 for phase_name, (start_pct, end_pct) in GAIT_PHASES.items():
                     start_idx = int((start_pct / 60.0) * 200)
                     end_idx = int((end_pct / 60.0) * 200)
