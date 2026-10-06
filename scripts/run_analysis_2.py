@@ -79,64 +79,61 @@ def main():
         for feat in TARGET_FEATURES:
             subject_maes[model_name][feat] = np.array(subject_maes[model_name][feat])
             
-    # Calculate means and stds over subjects
-    results_df = pd.DataFrame({"gait_cycle_percent": np.linspace(0, 100, 200)})
+    # Calculate phase-based means
+    # Assuming the 200 points represent the Stance Phase, which is typically 60% of the Gait Cycle.
+    # Therefore, we map Gait Cycle percentage to array index (0-200)
+    GAIT_PHASES = {
+        'LR (0-10%)':  (0.0, 10.0),   # Loading Response
+        'MSt (10-30%)': (10.0, 30.0),  # Mid Stance
+        'TSt (30-50%)': (30.0, 50.0),  # Terminal Stance
+        'PSw (50-60%)': (50.0, 60.0),  # Pre Swing
+    }
+    
+    phase_results = []
+    
+    # meta_base from fold 1 (using Transformer) for subject list
+    unique_subjects = data["Transformer"][1]["meta"]["subject_name"].unique()
     
     for feat in TARGET_FEATURES:
         for model_name in EXPERIMENT_DIRS:
-            mean_mae = np.mean(subject_maes[model_name][feat], axis=0)
-            std_mae = np.std(subject_maes[model_name][feat], axis=0, ddof=1)
+            # subject_maes[model_name][feat] is (12, 200)
+            mae_array = subject_maes[model_name][feat]
             
-            results_df[f"{model_name}_{feat}_MAE_mean"] = mean_mae
-            results_df[f"{model_name}_{feat}_MAE_std"] = std_mae
-            
-            if model_name != "Transformer":
-                # Paired difference per subject: (12, 200)
-                diff = subject_maes[model_name][feat] - subject_maes["Transformer"][feat]
-                results_df[f"{model_name}_minus_Transformer_{feat}_mean"] = np.mean(diff, axis=0)
-                results_df[f"{model_name}_minus_Transformer_{feat}_std"] = np.std(diff, axis=0, ddof=1)
-                
-    results_df.to_csv(os.path.join(OUTPUT_DIR, "gait_cycle_error_comparison.csv"), index=False)
+            for sub_idx, sub_name in enumerate(unique_subjects):
+                for phase_name, (start_pct, end_pct) in GAIT_PHASES.items():
+                    start_idx = int((start_pct / 60.0) * 200)
+                    end_idx = int((end_pct / 60.0) * 200)
+                    end_idx = min(end_idx, 200) # Safety
+                    
+                    phase_mae = np.mean(mae_array[sub_idx, start_idx:end_idx])
+                    
+                    phase_results.append({
+                        "Feature": feat,
+                        "Model": model_name,
+                        "Phase": phase_name,
+                        "Subject": sub_name,
+                        "MAE": phase_mae
+                    })
+                    
+    df_phases = pd.DataFrame(phase_results)
+    df_phases.to_csv(os.path.join(OUTPUT_DIR, "gait_phase_error_comparison.csv"), index=False)
     
+    import seaborn as sns
     # Plotting
     for feat in TARGET_FEATURES:
-        # Plot 1: Mean Absolute Error over Gait Cycle
         plt.figure(figsize=(10, 6))
-        for model_name, color in zip(["Transformer", "GCN", "EdgeConv"], ["blue", "green", "red"]):
-            mean = results_df[f"{model_name}_{feat}_MAE_mean"]
-            std = results_df[f"{model_name}_{feat}_MAE_std"]
-            x = results_df["gait_cycle_percent"]
-            
-            plt.plot(x, mean, label=model_name, color=color)
-            plt.fill_between(x, mean - std, mean + std, color=color, alpha=0.2)
-            
-        plt.title(f"Mean Absolute Error across Gait Cycle ({feat})")
-        plt.xlabel("Gait Cycle (%)")
-        plt.ylabel("MAE (%BW)")
-        plt.legend()
-        plt.grid(True)
-        plt.tight_layout()
-        plt.savefig(os.path.join(OUTPUT_DIR, f"fig_analysis2_mae_wave_{feat}.png"), dpi=300)
-        plt.close()
+        df_feat = df_phases[df_phases["Feature"] == feat]
         
-        # Plot 2: Difference vs Transformer
-        plt.figure(figsize=(10, 6))
-        for model_name, color in zip(["GCN", "EdgeConv"], ["green", "red"]):
-            diff_mean = results_df[f"{model_name}_minus_Transformer_{feat}_mean"]
-            diff_std = results_df[f"{model_name}_minus_Transformer_{feat}_std"]
-            x = results_df["gait_cycle_percent"]
-            
-            plt.plot(x, diff_mean, label=f"{model_name} - Transformer", color=color)
-            plt.fill_between(x, diff_mean - diff_std, diff_mean + diff_std, color=color, alpha=0.2)
-            
-        plt.axhline(0, color='black', linestyle='--')
-        plt.title(f"MAE Difference from Transformer ({feat})")
-        plt.xlabel("Gait Cycle (%)")
-        plt.ylabel("Delta MAE (Negative means better)")
-        plt.legend()
-        plt.grid(True)
+        sns.barplot(data=df_feat, x="Phase", y="MAE", hue="Model", 
+                    palette={"Transformer": "blue", "GCN": "green", "EdgeConv": "red"}, capsize=.05)
+        
+        plt.title(f"Mean Absolute Error by Gait Phase ({feat})")
+        plt.xlabel("Gait Phase")
+        plt.ylabel("MAE (%BW)")
+        plt.legend(title="Model")
+        plt.grid(axis='y')
         plt.tight_layout()
-        plt.savefig(os.path.join(OUTPUT_DIR, f"fig_analysis2_diff_wave_{feat}.png"), dpi=300)
+        plt.savefig(os.path.join(OUTPUT_DIR, f"fig_analysis2_phase_bar_{feat}.png"), dpi=300)
         plt.close()
 
     print("Analysis 2 completed. Results saved to", OUTPUT_DIR)
