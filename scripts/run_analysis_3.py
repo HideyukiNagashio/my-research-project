@@ -72,9 +72,10 @@ def main():
         'cnn_pool_dim': config.get('cnn_pool_dim', 32)
     }
     
-    # 1. Discover edges to ablate
-    model_fold1 = get_model(config['model_type'], **model_kwargs)
-    orig_edge_index = model_fold1.edge_index.clone()
+    # 1. Discover edges to ablate from the first fold's checkpoint
+    fold1_ckpt_path = os.path.join(EDGE_EXP_DIR, 'best_model_fold1.pth')
+    state_dict_fold1 = torch.load(fold1_ckpt_path, map_location=device)
+    orig_edge_index = state_dict_fold1['edge_index'].clone()
     
     edges_to_ablate = []
     for i in range(orig_edge_index.shape[1]):
@@ -84,7 +85,7 @@ def main():
             if (u, v) not in edges_to_ablate:
                 edges_to_ablate.append((u, v))
                 
-    print(f"Discovered {len(edges_to_ablate)} unique edges to ablate.")
+    print(f"Discovered {len(edges_to_ablate)} unique edges to ablate from checkpoint.")
     
     subject_ablation_results = []
     
@@ -98,7 +99,18 @@ def main():
     for fold in range(1, num_folds + 1):
         print(f"--- Processing Fold {fold} ---")
         model = get_model(config['model_type'], **model_kwargs).to(device)
-        model.load_state_dict(torch.load(os.path.join(EDGE_EXP_DIR, f'best_model_fold{fold}.pth'), map_location=device))
+        
+        state_dict = torch.load(os.path.join(EDGE_EXP_DIR, f'best_model_fold{fold}.pth'), map_location=device)
+        
+        # Override buffers to match the checkpoint shape to avoid size mismatch
+        if 'edge_index' in state_dict:
+            model.edge_index = state_dict['edge_index'].clone().to(device)
+            del state_dict['edge_index']
+        if 'norm_coords' in state_dict:
+            model.norm_coords = state_dict['norm_coords'].clone().to(device)
+            del state_dict['norm_coords']
+            
+        model.load_state_dict(state_dict, strict=False)
         
         stats_path = os.path.join(EDGE_EXP_DIR, f'y_standardization_stats_fold{fold}.json')
         y_mean_np, y_std_np = None, None
