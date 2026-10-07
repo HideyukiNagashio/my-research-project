@@ -6,6 +6,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.stats import wilcoxon
 
+plt.rcParams['font.family'] = 'Times New Roman'
+
 # Add project root to path so we can import src
 import sys
 repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -141,10 +143,10 @@ def main():
                       var_name="Model", value_name="Delta_NRMSE")
     plot_df["Model"] = plot_df["Model"].apply(lambda x: x.split('_')[0])
     
-    sns.barplot(data=plot_df, x="subject", y="Delta_NRMSE", hue="Model")
+    sns.barplot(data=plot_df, x="subject", y="Delta_NRMSE", hue="Model", 
+                palette={"GCN": "dodgerblue", "EdgeConv": "tomato"})
     plt.axhline(0, color='black', linestyle='--')
-    plt.title("Delta NRMSE for Fx per Subject (Baseline = Transformer)")
-    plt.ylabel("Delta NRMSE (Negative is better)")
+    plt.ylabel("Delta NRMSE")
     plt.xticks(rotation=45)
     plt.tight_layout()
     plt.savefig(os.path.join(OUTPUT_DIR, "fig_analysis1_delta_nrmse_bar.png"), dpi=300)
@@ -152,9 +154,8 @@ def main():
     
     # Paired plot
     plt.figure(figsize=(8, 6))
-    sns.pointplot(data=df_metrics, x="subject", y="Transformer_Fx_NRMSE", color="blue", label="Transformer", markers="o")
-    sns.pointplot(data=df_metrics, x="subject", y="EdgeConv_Fx_NRMSE", color="red", label="EdgeConv", markers="x")
-    plt.title("Paired Plot: Transformer vs EdgeConv (Fx NRMSE)")
+    sns.pointplot(data=df_metrics, x="subject", y="Transformer_Fx_NRMSE", color="dimgray", label="Transformer", markers="o")
+    sns.pointplot(data=df_metrics, x="subject", y="EdgeConv_Fx_NRMSE", color="tomato", label="EdgeConv", markers="x")
     plt.ylabel("NRMSE")
     plt.xticks(rotation=45)
     plt.legend(["Transformer", "EdgeConv"])

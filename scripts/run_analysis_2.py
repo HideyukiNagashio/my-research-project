@@ -3,6 +3,9 @@ import glob
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import seaborn as sns
+
+plt.rcParams['font.family'] = 'Times New Roman'
 
 import sys
 repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -87,10 +90,10 @@ def main():
     # Assuming the 200 points represent the Stance Phase, which is typically 60% of the Gait Cycle.
     # Therefore, we map Gait Cycle percentage to array index (0-200)
     GAIT_PHASES = {
-        'LR (0-10%)':  (0.0, 10.0),   # Loading Response
-        'MSt (10-30%)': (10.0, 30.0),  # Mid Stance
-        'TSt (30-50%)': (30.0, 50.0),  # Terminal Stance
-        'PSw (50-60%)': (50.0, 60.0),  # Pre Swing
+        'LR':  (0.0, 10.0),   # Loading Response
+        'MSt': (10.0, 30.0),  # Mid Stance
+        'TSt': (30.0, 50.0),  # Terminal Stance
+        'PSw': (50.0, 60.0),  # Pre Swing
     }
     
     phase_results = []
@@ -126,9 +129,8 @@ def main():
         df_feat = df_phases[df_phases["Feature"] == feat]
         
         sns.barplot(data=df_feat, x="Phase", y="MAE", hue="Model", 
-                    palette={"Transformer": "blue", "GCN": "green", "EdgeConv": "red"}, capsize=.05)
+                    palette={"Transformer": "dimgray", "GCN": "dodgerblue", "EdgeConv": "tomato"}, capsize=.05)
         
-        plt.title(f"Mean Absolute Error by Gait Phase ({feat})")
         plt.xlabel("Gait Phase")
         plt.ylabel("MAE (%BW)")
         plt.legend(title="Model")

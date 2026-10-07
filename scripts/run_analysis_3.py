@@ -9,6 +9,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from torch.utils.data import DataLoader
 
+plt.rcParams['font.family'] = 'Times New Roman'
+
 # Add project root to path so we can import src
 repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if repo_root not in sys.path:
@@ -197,10 +199,9 @@ def main():
     
     # Plotting Fx Ablation
     plt.figure(figsize=(10, 6))
-    sns.barplot(data=df_ablation, x="edge", y="delta_Fx_NRMSE", order=df_ablation["edge"])
+    sns.barplot(data=df_ablation, x="edge", y="delta_Fx_NRMSE", order=df_ablation["edge"], color="tomato")
     plt.axhline(0, color='black', linestyle='--')
-    plt.title("Edge Ablation Impact on Fx NRMSE (Delta > 0 means Edge is useful)")
-    plt.ylabel("Delta NRMSE (Ablated - Baseline)")
+    plt.ylabel("Delta NRMSE")
     plt.xlabel("Removed Edge")
     plt.xticks(rotation=45)
     plt.tight_layout()
