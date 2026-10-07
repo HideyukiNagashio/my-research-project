@@ -6,7 +6,13 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.stats import wilcoxon
 
-plt.rcParams['font.family'] = 'Times New Roman'
+plt.rcParams.update({
+    'font.family': 'Times New Roman',
+    'font.size': 14,
+    'axes.labelsize': 16,
+    'xtick.labelsize': 14,
+    'ytick.labelsize': 14,
+})
 
 # Add project root to path so we can import src
 import sys

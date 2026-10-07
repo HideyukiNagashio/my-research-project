@@ -5,7 +5,13 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-plt.rcParams['font.family'] = 'Times New Roman'
+plt.rcParams.update({
+    'font.family': 'Times New Roman',
+    'font.size': 14,
+    'axes.labelsize': 16,
+    'xtick.labelsize': 14,
+    'ytick.labelsize': 14,
+})
 
 import sys
 repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))

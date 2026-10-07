@@ -9,7 +9,13 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from torch.utils.data import DataLoader
 
-plt.rcParams['font.family'] = 'Times New Roman'
+plt.rcParams.update({
+    'font.family': 'Times New Roman',
+    'font.size': 14,
+    'axes.labelsize': 16,
+    'xtick.labelsize': 14,
+    'ytick.labelsize': 14,
+})
 
 # Add project root to path so we can import src
 repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
