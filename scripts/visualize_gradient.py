@@ -21,10 +21,10 @@ if 'DISPLAY' not in os.environ:
 import matplotlib.pyplot as plt
 plt.rcParams['font.family'] = 'Times New Roman'
 plt.rcParams.update({
-    'font.size': 14,
-    'axes.labelsize': 18,
-    'xtick.labelsize': 16,
-    'ytick.labelsize': 16,
+    'font.size': 20,
+    'axes.labelsize': 20,
+    'xtick.labelsize': 20,
+    'ytick.labelsize': 20,
 })
 import seaborn as sns
 import torch
@@ -420,7 +420,7 @@ def plot_feature_phase_matrix(mean_map, out_label, feature_names, seq_len, start
     cmap.set_bad(color='lightgray')
     
     sns.heatmap(
-        phase_matrix, cmap=cmap, annot=True, fmt=".5f", 
+        phase_matrix, cmap=cmap, annot=False, 
         xticklabels=phase_names, yticklabels=feature_names,
         vmin=0.0, vmax=vmax, cbar_kws={'label': 'Mean Gradient Magnitude'}
     )
@@ -606,7 +606,7 @@ def plot_feature_importance_bars(abs_sums, rel_pcts, feature_names, out_label, s
     ax2.set_xlim(0, 15)
     ax2.grid(axis='x', linestyle='--', alpha=0.7)
     for i, v in enumerate(rel_pcts):
-        ax2.text(v + 0.5, i, f"{v:.1f}%", va='center', fontsize=9)
+        ax2.text(v + 0.5, i, f"{v:.1f}%", va='center', fontsize=20)
     plt.tight_layout()
     if timers is not None:
         timers['Plotting'] += time.time() - t_plot_start
