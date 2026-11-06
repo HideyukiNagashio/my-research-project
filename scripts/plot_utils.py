@@ -28,14 +28,14 @@ def get_gait_phase_ticks(stride_type: str, num_steps: int = 200):
         tick_vals (list): Actual percentage values (e.g. 0, 20, 60).
         tick_labels (list): String labels (e.g. '0', '20', '60').
     """
-    if stride_type == '0.5':
+    if stride_type in ['0.5', 'HS-TO', 'stance']:
         start_pct, end_pct = 0, 60
-    elif stride_type in ['1.0_pre_swing', 'pre']:
+    elif stride_type in ['1.0_pre_swing', 'pre', 'TO-TO']:
         start_pct, end_pct = -40, 60
     elif stride_type == '1.5':
         start_pct, end_pct = -40, 100
     else:
-        # Default covers '1.0', '1.0_post_swing', 'post'
+        # Default covers '1.0', '1.0_post_swing', 'post', 'HS-HS'
         start_pct, end_pct = 0, 100
 
     pct_array = np.linspace(start_pct, end_pct, num_steps)

@@ -62,9 +62,9 @@ def get_phase_indices(seq_len=200, seq_start_pct=0.0, seq_end_pct=100.0):
 
 
 
-def plot_all_gradient_approaches(mean_3d_dynamics, fold_out_dir, out_label, feature_names, in_cols, x_tick_indices, x_tick_labels, y_tick_indices, y_tick_labels, stride_type_X, stride_type_Y, phase_slices, in_dim, seq_len, sample_suffix, vmax_dict_parsed=None):
+def plot_all_gradient_approaches(mean_3d_dynamics, fold_out_dir, out_label, feature_names, in_cols, x_tick_indices, x_tick_labels, y_tick_indices, y_tick_labels, stride_type_X, stride_type_Y, phase_slices, in_dim, in_seq_len, sample_suffix, vmax_dict_parsed=None):
     from scripts.plot_utils import get_gait_phase_ticks
-    pct_array_in, _, _, _ = get_gait_phase_ticks(stride_type_X, seq_len)
+    pct_array_in, _, _, _ = get_gait_phase_ticks(stride_type_X, in_seq_len)
     start_pct_X, end_pct_X = pct_array_in[0], pct_array_in[-1]
     
     vmax = vmax_dict_parsed.get(out_label, None) if vmax_dict_parsed else None
@@ -95,7 +95,7 @@ def plot_all_gradient_approaches(mean_3d_dynamics, fold_out_dir, out_label, feat
     print(f"\n--> Running Feature-by-Phase Importance Map for Output {out_label}...")
     t_app2_5_start = time.time()
     save_path_phase = os.path.join(fold_out_dir, "phase", f"feature_phase_matrix_{out_label}{sample_suffix}.png")
-    plot_feature_phase_matrix(mean_average, out_label, feature_names, seq_len, start_pct_X, end_pct_X, save_path=save_path_phase, vmax=vmax, timers=timers_app2)
+    plot_feature_phase_matrix(mean_average, out_label, feature_names, in_seq_len, start_pct_X, end_pct_X, save_path=save_path_phase, vmax=vmax, timers=timers_app2)
     t_app2_5_total = time.time() - t_app2_5_start
     print(f"Feature-by-Phase Time: {t_app2_5_total:.3f}s")
     
@@ -106,7 +106,7 @@ def plot_all_gradient_approaches(mean_3d_dynamics, fold_out_dir, out_label, feat
     mean_phase_maps = {}
     for phase_name, (start_idx, end_idx) in phase_slices.items():
         if end_idx - start_idx == 0:
-            mean_phase_maps[phase_name] = np.zeros((in_dim, seq_len))
+            mean_phase_maps[phase_name] = np.zeros((in_dim, in_seq_len))
         else:
             mean_phase_maps[phase_name] = np.mean(mean_3d_dynamics[:, :, start_idx:end_idx], axis=2)
     save_path = os.path.join(fold_out_dir, "phase", f"phase_wise_smoothed_maps_{out_label}{sample_suffix}.png")
@@ -160,39 +160,42 @@ def compute_dynamics_map_slow(model, input_data, out_col, in_col):
 def compute_dynamics_map_all_features(model, input_data, out_col, timers=None):
     """
     Computes absolute gradients for all input features across all output time steps
-    in a single forward pass and seq_len backward passes, supporting BATCH PROCESSING.
+    in a single forward pass and out_seq_len backward passes, supporting BATCH PROCESSING.
+    Supports asymmetric models where in_seq_len != out_seq_len (e.g. 340 in, 200 out).
     
     Args:
         model: PyTorch model
-        input_data: Input tensor of shape (batch_size, seq_len, in_dim) with requires_grad=True
+        input_data: Input tensor of shape (batch_size, in_seq_len, in_dim) with requires_grad=True
         out_col: Target output index (0~2)
         timers: Optional dictionary to record breakdown of execution times
         
     Returns:
-        dynamics_maps: numpy array of shape (in_dim, seq_len, seq_len)
+        dynamics_maps: numpy array of shape (in_dim, in_seq_len, out_seq_len)
                        representing the SUM of absolute gradients across the batch.
                        [in_dim, input_time_y, output_time_x]
     """
     t_start = time.time()
     model.eval()
     batch_size = input_data.shape[0]
-    seq_len = input_data.shape[1]
+    in_seq_len = input_data.shape[1]
     in_dim = input_data.shape[2]
     
     import torch
     
-    # Pre-allocate result on GPU to avoid CPU synchronization in the loop
-    dynamics_maps_gpu = torch.zeros((in_dim, seq_len, seq_len), device=input_data.device)
-    
     # 1. Forward pass for the entire batch
     if timers is not None:
         t_fwd_start = time.time()
-    outputs = model(input_data)  # Shape: (batch_size, seq_len, out_dim)
+    outputs = model(input_data)  # Shape: (batch_size, out_seq_len, out_dim)
     if timers is not None:
         timers['Forward'] += time.time() - t_fwd_start
         timers['forward_calls'] += 1
+
+    out_seq_len = outputs.shape[1]
+    
+    # Pre-allocate result on GPU with shape (in_dim, in_seq_len, out_seq_len)
+    dynamics_maps_gpu = torch.zeros((in_dim, in_seq_len, out_seq_len), device=input_data.device)
         
-    for x in range(seq_len):
+    for x in range(out_seq_len):
         if input_data.grad is not None:
             input_data.grad.zero_()
         model.zero_grad()
@@ -202,7 +205,7 @@ def compute_dynamics_map_all_features(model, input_data, out_col, timers=None):
         score = outputs[:, x, out_col].sum()
         
         # 2. Backward pass. Retain graph for all steps except the last one to release memory.
-        is_last = (x == seq_len - 1)
+        is_last = (x == out_seq_len - 1)
         if timers is not None:
             t_bwd_start = time.time()
         score.backward(retain_graph=not is_last)
@@ -213,9 +216,9 @@ def compute_dynamics_map_all_features(model, input_data, out_col, timers=None):
             if timers is not None:
                 t_agg_start = time.time()
             
-            # input_data.grad shape is (batch_size, seq_len, in_dim)
+            # input_data.grad shape is (batch_size, in_seq_len, in_dim)
             # We sum the absolute gradients across the batch entirely on the GPU
-            grad_all_sum = input_data.grad.abs().sum(dim=0)  # Shape: (seq_len, in_dim) on GPU
+            grad_all_sum = input_data.grad.abs().sum(dim=0)  # Shape: (in_seq_len, in_dim) on GPU
             dynamics_maps_gpu[:, :, x] = grad_all_sum.T
             
             if timers is not None:
@@ -249,15 +252,16 @@ def compute_overall_average_map(model, input_data, out_col, timers=None):
     return mean_map
 
 
-def compute_phase_smoothed_maps(model, input_data, out_col, timers=None):
+def compute_phase_smoothed_maps(model, input_data, out_col, seq_start_pct=0.0, seq_end_pct=100.0, timers=None):
     """Wrapper that uses compute_dynamics_map_all_features and slices/averages by phase slices."""
     all_dynamics = compute_dynamics_map_all_features(model, input_data, out_col, timers=timers)
     
     if timers is not None:
         t_seg_start = time.time()
-    seq_len = input_data.shape[1]
-    in_dim = input_data.shape[2]
-    phase_slices = get_phase_indices(seq_len, 0.0, 100.0)
+    in_seq_len = all_dynamics.shape[1]
+    out_seq_len = all_dynamics.shape[2]
+    in_dim = all_dynamics.shape[0]
+    phase_slices = get_phase_indices(out_seq_len, seq_start_pct, seq_end_pct)
     if timers is not None:
         timers['Phase Segmentation'] += time.time() - t_seg_start
         
@@ -266,7 +270,7 @@ def compute_phase_smoothed_maps(model, input_data, out_col, timers=None):
         if end_idx - start_idx == 0:
             if timers is not None:
                 t_smooth_start = time.time()
-            phase_maps[phase_name] = np.zeros((in_dim, seq_len))
+            phase_maps[phase_name] = np.zeros((in_dim, in_seq_len))
             if timers is not None:
                 timers['Smoothing'] += time.time() - t_smooth_start
         else:
@@ -641,6 +645,19 @@ def load_data_and_model(exp_dir, fold, device):
     stride_type_X = config.get("stride_type_X", "1.0_post_swing")
     stride_type_Y = config.get("stride_type_Y", "1.0_post_swing")
     
+    # Auto-resolve stride types if experiment was run with condition (e.g. TO-TO, HS-HS, HS-TO)
+    if "condition" in config:
+        cond = config["condition"]
+        if cond == 'TO-TO':
+            stride_type_X = '1.0_pre_swing'
+            stride_type_Y = '0.5'
+        elif cond == 'HS-HS':
+            stride_type_X = '1.0_post_swing'
+            stride_type_Y = '0.5'
+        elif cond == 'HS-TO':
+            stride_type_X = '0.5'
+            stride_type_Y = '0.5'
+    
     # Calculate input dimension
     if input_type == 'single_leg': in_dim = 14
     elif input_type == 'bilateral': in_dim = 28
@@ -681,6 +698,21 @@ def load_data_and_model(exp_dir, fold, device):
             'num_layers': config.get("num_layers", 3),
             'dim_feedforward': config.get("dim_feedforward", 256)
         })
+    elif model_type == 'transformer_stance':
+        model_kwargs.update({
+            'd_model': config.get("d_model", 128),
+            'nhead': config.get("nhead", 4),
+            'num_layers': config.get("num_layers", 3),
+            'dim_feedforward': config.get("dim_feedforward", 256)
+        })
+        window_spec = config.get("window_spec", {})
+        if window_spec:
+            model_kwargs.update({
+                'seq_len': window_spec.get('seq_len', 340),
+                'stance_start': window_spec.get('stance_start', 0),
+                'stance_len': window_spec.get('stance_len', 200),
+                'pos_start': window_spec.get('pos_start', 0)
+            })
         
     if get_model is None:
         raise ImportError("Cannot import get_model. Make sure scripts are run from the project root.")
@@ -1006,12 +1038,17 @@ def main():
         model, inputs, feature_names, target_names, in_dim, out_dim, stride_type_X, stride_type_Y = load_data_and_model(
             args.exp_dir, fold, device
         )
-        seq_len = inputs.shape[1]
+        in_seq_len = inputs.shape[1]
         
-        pct_array_out, x_tick_indices, _, x_tick_labels = get_gait_phase_ticks(stride_type_Y, seq_len)
+        # Determine out_seq_len dynamically by inspecting model output
+        with torch.no_grad():
+            dummy_in = torch.tensor(inputs[:1], dtype=torch.float32).to(device)
+            out_seq_len = model(dummy_in).shape[1]
+        
+        pct_array_out, x_tick_indices, _, x_tick_labels = get_gait_phase_ticks(stride_type_Y, out_seq_len)
         start_pct_out, end_pct_out = pct_array_out[0], pct_array_out[-1]
         
-        pct_array_in, y_tick_indices, _, y_tick_labels = get_gait_phase_ticks(stride_type_X, seq_len)
+        pct_array_in, y_tick_indices, _, y_tick_labels = get_gait_phase_ticks(stride_type_X, in_seq_len)
         start_pct_in, end_pct_in = pct_array_in[0], pct_array_in[-1]
         
         # Determine target output columns
@@ -1049,7 +1086,7 @@ def main():
         os.makedirs(os.path.join(fold_out_dir, "importance"), exist_ok=True)
         os.makedirs(cache_dir, exist_ok=True)
         
-        phase_slices = get_phase_indices(seq_len, start_pct_out, end_pct_out)
+        phase_slices = get_phase_indices(out_seq_len, start_pct_out, end_pct_out)
         
         # We will loop over each output column o_c
         for o_c in out_cols:
@@ -1062,7 +1099,7 @@ def main():
                 mean_3d_dynamics = np.load(cache_file)
             else:
                 # --- 1. Compute and accumulate the 3D dynamics maps across all samples ---
-                accum_3d_dynamics = np.zeros((in_dim, seq_len, seq_len))
+                accum_3d_dynamics = np.zeros((in_dim, in_seq_len, out_seq_len))
                 
                 t_calc_start = time.time()
                 timers_calc = {
@@ -1104,7 +1141,7 @@ def main():
                 global_samples_dict[fold] = len(indices_to_avg)
                 
             if not args.global_only:
-                plot_all_gradient_approaches(mean_3d_dynamics, fold_out_dir, out_label, feature_names, in_cols, x_tick_indices, x_tick_labels, y_tick_indices, y_tick_labels, stride_type_X, stride_type_Y, phase_slices, in_dim, seq_len, sample_suffix, vmax_dict_parsed)
+                plot_all_gradient_approaches(mean_3d_dynamics, fold_out_dir, out_label, feature_names, in_cols, x_tick_indices, x_tick_labels, y_tick_indices, y_tick_labels, stride_type_X, stride_type_Y, phase_slices, in_dim, in_seq_len, sample_suffix, vmax_dict_parsed)
             else:
                 print(f"Skipping plot generation for Fold {fold} Output {out_label} (--global_only active)")
             
@@ -1129,7 +1166,7 @@ def main():
             global_mean_3d = global_accum[o_c] / total_samples
             
             print(f"\n--> Plotting Global Average for Output {out_label}...")
-            plot_all_gradient_approaches(global_mean_3d, global_out_dir, out_label, feature_names, in_cols, x_tick_indices, x_tick_labels, y_tick_indices, y_tick_labels, stride_type_X, stride_type_Y, phase_slices, in_dim, seq_len, "_global_mean", vmax_dict_parsed)
+            plot_all_gradient_approaches(global_mean_3d, global_out_dir, out_label, feature_names, in_cols, x_tick_indices, x_tick_labels, y_tick_indices, y_tick_labels, stride_type_X, stride_type_Y, phase_slices, in_dim, in_seq_len, "_global_mean", vmax_dict_parsed)
             
     print("\nAll tasks completed successfully!")
 
