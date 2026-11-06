@@ -442,3 +442,33 @@ outputs/experiments/【実験名】/gradient_plots/
 ---
 *この体系化された統合基盤により、再現性の確保やデータリークの構造的な回避が実現されており、開発者および共同研究者はより上位の「比較検証」と「研究論文執筆」等に注力することが可能です。*
 
+
+---
+
+## 16. 遊脚期情報を含む入力実験 (TO-TO / HS-HS, 査読対応)
+
+入力全体を 200 点に正規化すると立脚期の時間分解能が下がる，という指摘への対応実験です。**遊脚期と立脚期を別々に時間正規化**し（立脚期 200 点・遊脚期 `N` 点），Transformer Encoder には全区間を入力，**Encoder 出力から立脚期に対応する区間だけを抽出**して床反力 (200×3) を推定します。既存コード（`train_cv.py` や既存モデル）の挙動は変えていません。
+
+| 条件 | 入力系列 | 入力形状 | Encoder 出力 | 抽出区間 | PE 位置インデックス |
+| :-- | :-- | :-- | :-- | :-- | :-- |
+| HS-TO | 立脚 | 200×14 | 200×128 | `[0:200]` | 0..199 |
+| TO-TO | 遊脚(N) + 立脚(200) | (N+200)×14 | (N+200)×128 | `[N:N+200]` | -N..-1, 0..199 |
+| HS-HS | 立脚(200) + 遊脚(N) | (200+N)×14 | (200+N)×128 | `[0:200]` | 0..199, 200..199+N |
+
+**ファイル**
+- `src/preprocessing/stride.py` / `pipeline.py`: オプション引数で遊脚期セグメント (`S_pre_swing`, `S_post_swing`) と実時間の区間長 (`seg_lengths`) を追加（既定では従来と完全に同一）
+- `scripts/make_swing_stance_cv.py`: 遊脚期入りの CV データ作成（`data/interim/raw_strides_swing{N}`, `data/processed/cv_grf_swing{N}`。既存データは上書きしない）
+- `src/training/dataset_swing.py`: `GaitSwingStanceDataset`（条件ごとの入力連結・立脚期区間と教師の対応を assert）
+- `src/models/transformer_stance.py`: `StanceExtractTransformer`（`model_type=transformer_stance`）
+- `scripts/train_cv_stance.py`: 学習・評価（基準実験と同じ設定・既存の `GRF_FOLDS`）
+- `scripts/verify_swing_stance.py`: 形状・PE・時間対応・CV 分割の検証 / `scripts/analyze_swing_stance_durations.py`: 遊脚/立脚の実時間の集計
+
+**実行方法**
+```bash
+export PYTHONPATH="$(pwd)"
+python scripts/make_swing_stance_cv.py --swing_points 140          # データ作成 (1回)
+python scripts/analyze_swing_stance_durations.py                   # 遊脚期点数の妥当性確認
+python scripts/verify_swing_stance.py --folds 1 6                  # 検証
+for c in HS-TO TO-TO HS-HS; do python scripts/train_cv_stance.py --condition $c --exp_name swing140; done
+python scripts/train_cv_stance.py --condition TO-TO --folds 1 --epochs 2   # 動作確認
+```

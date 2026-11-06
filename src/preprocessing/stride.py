@@ -26,7 +26,13 @@ def detect_toe_offs(sig, threshold=0.05, min_dist=40):
     return np.array(result)
 
 def slice_strides(df, fz_col, side='Left', threshold=0.05, fs=100,
-                  min_dur=0.7, max_dur=1.8, apply_grf_shift=True):
+                  min_dur=0.7, max_dur=1.8, apply_grf_shift=True, include_swing=False):
+    """
+    include_swing=True の場合のみ，遊脚期単独のセグメントを追加で返す（既定 False では従来と完全に同一）．
+      'S_pre_swing'  : [to_prev, hs_curr)  立脚期の直前の遊脚期（TO-TO入力の前半）
+      'S_post_swing' : [to_curr, hs_next)  立脚期の直後の遊脚期（HS-HS入力の後半）
+    ストライド選別・GRFオフセット補正は従来と同一（追加キーは bounding box の内側に収まる）．
+    """
     sig, time = df[fz_col].values, df['Time (Seconds)'].values
     
     hs_cands = detect_heel_strikes(sig, threshold, int(0.4 * fs))
@@ -37,6 +43,9 @@ def slice_strides(df, fz_col, side='Left', threshold=0.05, fs=100,
         'X_0.5': [], 'X_1.0_pre_swing': [], 'X_1.0_post_swing': [], 'X_1.5': [],
         'Y_0.5': [], 'Y_1.0_pre_swing': [], 'Y_1.0_post_swing': []
     }
+    if include_swing:
+        strides_out['S_pre_swing'] = []
+        strides_out['S_post_swing'] = []
     durations = []
     
     for i in range(1, len(hs_cands) - 1):
@@ -68,6 +77,14 @@ def slice_strides(df, fz_col, side='Left', threshold=0.05, fs=100,
             'Y_1.0_pre_swing': (to_prev, to_curr),
             'Y_1.0_post_swing': (hs_curr, hs_next)
         }
+        
+        # 遊脚期単独セグメント（min/max の計算には影響しないよう bounds とは別に保持）
+        swing_bounds = {}
+        if include_swing:
+            swing_bounds = {
+                'S_pre_swing': (to_prev, hs_curr),
+                'S_post_swing': (to_curr, hs_next),
+            }
         
         # Bounding box for the entire stride (to cover all patterns, min to max)
         min_idx = min([b[0] for b in bounds.values()])
@@ -111,6 +128,8 @@ def slice_strides(df, fz_col, side='Left', threshold=0.05, fs=100,
 
         # Slice all patterns
         for key, (start_idx, end_idx) in bounds.items():
+            strides_out[key].append(df_seg.iloc[start_idx - min_idx : end_idx - min_idx].copy())
+        for key, (start_idx, end_idx) in swing_bounds.items():
             strides_out[key].append(df_seg.iloc[start_idx - min_idx : end_idx - min_idx].copy())
             
         durations.append(dur)

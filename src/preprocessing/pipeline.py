@@ -15,7 +15,13 @@ from .stride import slice_strides, normalize_strides_bilateral, filter_outlier_s
 from .normalization import normalize_force_by_bodyweight, apply_global_normalization
 
 def _process_single(args):
-    participant, condition, mass = args
+    # args = (participant, condition, mass[, swing_points])
+    # swing_points が指定された場合のみ，遊脚期セグメント ('S_pre_swing', 'S_post_swing') を
+    # swing_points 点に時間正規化して ensemble_dict に追加し，実時間の区間長 'seg_lengths' も返す．
+    # 指定しない場合（既存の呼び出し）は従来と完全に同一の挙動．
+    participant, condition, mass = args[:3]
+    swing_points = args[3] if len(args) > 3 else None
+    include_swing = swing_points is not None
     try:
         data     = load_participant_data(participant, condition, mass)
         df_mocap = clean_mocap_columns(data['mocap'])
@@ -42,18 +48,30 @@ def _process_single(args):
 
         df_final = synchronize_merge_and_extract(df_l_off, df_r_off, df_angles, df_force_bw)
 
-        r_strides_dict, r_dur = slice_strides(df_final, 'Right_Fz', 'Right')
-        l_strides_dict, l_dur = slice_strides(df_final, 'Left_Fz',  'Left')
+        r_strides_dict, r_dur = slice_strides(df_final, 'Right_Fz', 'Right', include_swing=include_swing)
+        l_strides_dict, l_dur = slice_strides(df_final, 'Left_Fz',  'Left',  include_swing=include_swing)
+
+        # 実時間の区間長 [遊脚期(pre), 立脚期, 遊脚期(post)] (samples @100Hz)．正規化前に記録する
+        r_seglen = l_seglen = None
+        if include_swing:
+            def _seglen(sd):
+                return np.array([[len(a), len(b), len(c)] for a, b, c in
+                                 zip(sd['S_pre_swing'], sd['X_0.5'], sd['S_post_swing'])],
+                                dtype=np.int32).reshape(-1, 3)
+            r_seglen, l_seglen = _seglen(r_strides_dict), _seglen(l_strides_dict)
+
+        def _n_points(k):
+            return swing_points if k.startswith('S_') else 200
 
         r_ens_dict, r_dfs_dict = {}, {}
         for k, v in r_strides_dict.items():
-            dfs, ens = normalize_strides_bilateral(v, COLS_RIGHT, COLS_LEFT)
+            dfs, ens = normalize_strides_bilateral(v, COLS_RIGHT, COLS_LEFT, n_points=_n_points(k))
             r_dfs_dict[k] = dfs
             r_ens_dict[k] = ens
 
         l_ens_dict, l_dfs_dict = {}, {}
         for k, v in l_strides_dict.items():
-            dfs, ens = normalize_strides_bilateral(v, COLS_LEFT, COLS_RIGHT)
+            dfs, ens = normalize_strides_bilateral(v, COLS_LEFT, COLS_RIGHT, n_points=_n_points(k))
             l_dfs_dict[k] = dfs
             l_ens_dict[k] = ens
 
@@ -90,8 +108,15 @@ def _process_single(args):
             merged_ens_dict[k] = merged_ens_k
 
         print(f"✓ {participant}_{condition}: {merged_ens_dict['X_1.0_post_swing'].shape[0]} strides (52ch bilateral)")
-        return dict(participant=participant, condition=condition, mass=mass,
-                    ensemble_dict=merged_ens_dict, columns=merged_cols, durations=merged_dur)
+        result = dict(participant=participant, condition=condition, mass=mass,
+                      ensemble_dict=merged_ens_dict, columns=merged_cols, durations=merged_dur)
+        if include_swing:
+            # merge_bilateral と同じ順序（右→左）・同じ keep マスクで揃える
+            merged_seglen = np.concatenate([r_seglen[r_keep] if len(r_keep) > 0 else r_seglen[:0],
+                                            l_seglen[l_keep] if len(l_keep) > 0 else l_seglen[:0]], axis=0)
+            assert merged_seglen.shape[0] == merged_ens_dict['X_1.0_post_swing'].shape[0]
+            result['seg_lengths'] = merged_seglen
+        return result
     except Exception as e:
         print(f"✗ {participant}_{condition}: {e}")
         traceback.print_exc()
